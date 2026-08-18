@@ -1,0 +1,13 @@
+node_modules
+dist
+data
+.git
+.env
+.env.local
+.env.*.local
+userbot/venv
+userbot/downloads
+userbot/*.session
+userbot/*.session-journal
+userbot/__pycache__
+*.log

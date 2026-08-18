@@ -1,0 +1,24 @@
+# وابستگی‌ها و خروجی build
+node_modules/
+dist/
+
+# اطلاعات حساس - توکن‌ها، کلیدها، رمزها
+.env
+.env.local
+.env.*.local
+
+# فایل‌های داده و لاگ محلی برنامه (این‌ها خارج از پوشه پروژه هستن ولی برای اطمینان)
+*.log
+npm-debug.log*
+
+# یوزربات: venv حجیمه و فایل session کاملاً محرمانه‌ست
+userbot/venv/
+userbot/downloads/
+userbot/*.session
+userbot/*.session-journal
+userbot/__pycache__/
+
+# فایل‌های موقت/سیستمی
+.DS_Store
+*.swp
+data/

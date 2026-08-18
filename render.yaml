@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: zagros-repost
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    # [فاز ۲] قبل از استارت واقعی، migration های Prisma را اعمال می‌کند
+    # (idempotent — دوباره اجرا کردنش مشکلی ایجاد نمی‌کند).
+    startCommand: npx prisma migrate deploy && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      # [فاز ۱] اتصال Postgres برای پل‌ها/لاگ‌ها — یک دیتابیس (خود Render
+      # Postgres یا Neon/Supabase) بسازید و رشته‌ی اتصالش را اینجا بگذارید.
+      - key: DATABASE_URL
+        sync: false
+      # Set this to a long random secret in the Render dashboard.
+      # It lets you reset the admin password from the login screen if you
+      # ever get locked out — there is no email/SMS available for that.
+      - key: ADMIN_RECOVERY_KEY
+        sync: false
+      # Optional: only needed if you use the AI rewrite/translate feature.
+      - key: GEMINI_API_KEY
+        sync: false
+      # Optional: pino log level (fatal/error/warn/info/debug/trace). Defaults to "info".
+      - key: LOG_LEVEL
+        value: info
+      # [فاز ۲] اختیاری — فقط اگر سرویس یوزربات را جدا (مثلاً روی یک VPS
+      # دیگر) اجرا می‌کنید و می‌خواهید موتور push-based فعال باشد.
+      - key: USERBOT_SERVICE_URL
+        sync: false
+      - key: USERBOT_SECRET
+        sync: false
+      - key: USERBOT_RELAY_CHANNEL
+        sync: false
+    disk:
+      # Render's free plan has an ephemeral filesystem — بدون یک دیسک
+      # ماندگار، DATA_DIR (حساب ادمین/session) با هر دیپلوی پاک می‌شود.
+      # پل‌ها/لاگ‌ها از فاز ۱ به بعد روی Postgres هستند، نه این دیسک — پس
+      # این محدودیت دیگر برای داده‌ی اصلی مهم نیست، فقط برای لاگین ادمین.
+      name: zagros-data
+      mountPath: /var/data
+      sizeGB: 1

@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Vazirmatn:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  font-family: 'Vazirmatn', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: dark;
+  background-color: #0a0a0a;
+  color: #f4f4f5;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #0a0a0a;
+  color: #f4f4f5;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(249, 115, 22, 0.07) 0%, transparent 60%),
+    linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 100% 100%, 32px 32px, 32px 32px;
+  overflow-x: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Light Mode Overrides for High-Contrast Clean Theme */
+html.light, body.light {
+  color-scheme: light;
+  background-color: #f1f5f9;
+  color: #0f172a;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.08) 0%, transparent 60%),
+    linear-gradient(to right, rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+}
+
+.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+.light ::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+}
+
+.light header {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 4px 15px -3px rgba(0, 0, 0, 0.05) !important;
+}
+
+.light footer {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+.light .bg-\[\#0d0e12\],
+.light .bg-\[\#0a0a0a\],
+.light .bg-\[\#0a0c10\],
+.light .bg-\[\#0e0e11\] {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light .bg-\[\#14161f\],
+.light .bg-\[\#18181b\],
+.light .bg-\[\#121212\],
+.light .bg-\[\#121212\]\/95,
+.light .editorial-card {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.06) !important;
+}
+
+/* High Contrast Typography in Light Mode */
+.light .text-white {
+  color: #0f172a !important;
+}
+
+.light .text-white\/90,
+.light .text-white\/80,
+.light .text-white\/70,
+.light .text-white\/60 {
+  color: #1e293b !important;
+}
+
+.light .text-white\/50,
+.light .text-white\/40,
+.light .text-white\/30 {
+  color: #475569 !important;
+}
+
+.light .border-white\/5,
+.light .border-white\/10,
+.light .border-white\/15,
+.light .border-white\/20 {
+  border-color: #cbd5e1 !important;
+}
+
+.light .bg-white\/5 {
+  background-color: rgba(15, 23, 42, 0.04) !important;
+}
+.light .bg-white\/10 {
+  background-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+/* Form controls in Light Mode */
+.light input[type="text"],
+.light input[type="password"],
+.light input[type="number"],
+.light select,
+.light textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+}
+
+.light input::placeholder,
+.light textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* Accent Colors legibility in Light Mode */
+.light .text-blue-400 { color: #1d4ed8 !important; }
+.light .text-emerald-400 { color: #047857 !important; }
+.light .text-orange-400 { color: #c2410c !important; }
+.light .text-amber-400 { color: #b45309 !important; }
+.light .text-red-400 { color: #b91c1c !important; }
+
+.light .bg-blue-500\/10 { background-color: #dbeafe !important; }
+.light .bg-emerald-500\/10 { background-color: #d1fae5 !important; }
+.light .bg-orange-500\/10 { background-color: #ffedd5 !important; }
+.light .bg-amber-500\/10 { background-color: #fef3c7 !important; }
+.light .bg-red-500\/10 { background-color: #fee2e2 !important; }
+
+.font-mono-code {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Custom Editorial Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #f97316;
+}
+
+/* Glowing Border Accent */
+.orange-glow {
+  box-shadow: 0 0 25px -5px rgba(249, 115, 22, 0.25);
+}
+
+.editorial-card {
+  background-color: #121212;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.editorial-card:hover {
+  border-color: rgba(249, 115, 22, 0.3);
+}

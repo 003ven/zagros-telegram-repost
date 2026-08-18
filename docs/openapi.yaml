@@ -1,0 +1,283 @@
+# مستندسازی OpenAPI برای API این پروژه — فاز ۳ب (references/roadmap.md).
+#
+# این فایل endpoint های اصلی را مستند می‌کند تا یکپارچگی با ابزارهای
+# دیگر (Postman، اسکریپت شخصی، Zapier/n8n از طریق webhook خروجی هر
+# پل) ساده‌تر شود. همه‌ی مسیرها (به‌جز auth عمومی و
+# /api/internal/incoming-message که فقط داخلی است) نیاز به هدر
+# `Authorization: Bearer <token>` دارند — توکن از /api/auth/login می‌آید.
+#
+# این یک اسپک دستی و خلاصه است، نه تولیدشده از کد — اگر route جدیدی به
+# server.ts اضافه کردی، اینجا را هم به‌روز کن (نگاه کن به
+# references/extension-recipes.md بند ۶ برای الگوی افزودن endpoint جدید).
+
+openapi: 3.0.3
+info:
+  title: Zagros Repost API
+  version: '1.0'
+  description: |
+    API داخلی پنل زاگرس ریپوست. این پروژه عمداً تک‌کاربره طراحی شده
+    (نگاه کن به references/roadmap.md) — یک توکن session معتبر به همه‌ی
+    داده‌ها دسترسی کامل دارد.
+servers:
+  - url: http://localhost:3000
+    description: Local dev
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    Connection:
+      type: object
+      properties:
+        id: { type: string }
+        sourceChannel: { type: string, example: '@source_channel' }
+        targetChannel: { type: string, example: '@target_channel' }
+        status: { type: string, enum: [active, inactive, error] }
+        lastMessageId: { type: integer, nullable: true }
+        transferredCount: { type: integer }
+        config:
+          type: object
+          description: TelegramConnectionConfig — نگاه کن به src/schemas.ts
+
+    ScheduledPost:
+      type: object
+      properties:
+        id: { type: string }
+        connectionId: { type: string }
+        text: { type: string }
+        scheduledAt: { type: string, format: date-time }
+        status: { type: string, enum: [pending, sent, failed, canceled] }
+        error: { type: string, nullable: true }
+
+paths:
+  /api/auth/login:
+    post:
+      summary: ورود و دریافت توکن session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: ورود موفق
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  token: { type: string }
+
+  /api/connections:
+    get:
+      summary: لیست همه‌ی پل‌ها
+      responses:
+        '200':
+          description: لیست پل‌ها
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  connections:
+                    type: array
+                    items: { $ref: '#/components/schemas/Connection' }
+    post:
+      summary: ساخت پل جدید
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceChannel, targetChannel, botToken]
+              properties:
+                sourceChannel: { type: string }
+                targetChannel: { type: string }
+                botToken: { type: string }
+                config:
+                  type: object
+                  description: بخشی/کامل از TelegramConnectionConfig (اختیاری)
+      responses:
+        '201':
+          description: پل ساخته شد
+        '409':
+          description: پل تکراری (همان مبدأ/مقصد/ربات قبلاً وجود دارد)
+
+  /api/connections/{id}/config:
+    put:
+      summary: به‌روزرسانی تنظیمات/قوانین یک پل
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                config:
+                  type: object
+                  description: بخشی از TelegramConnectionConfig برای merge با تنظیمات فعلی
+      responses:
+        '200': { description: به‌روزرسانی موفق }
+        '404': { description: پل یافت نشد }
+
+  /api/connections/{id}/toggle:
+    put:
+      summary: فعال/غیرفعال کردن یک پل
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: تغییر وضعیت موفق }
+
+  /api/connections/{id}:
+    delete:
+      summary: حذف یک پل
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: حذف موفق }
+        '404': { description: پل یافت نشد }
+
+  /api/connections/bulk-action:
+    post:
+      summary: عملیات دسته‌جمعی (start/stop/delete) روی چند پل
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, action]
+              properties:
+                ids: { type: array, items: { type: string } }
+                action: { type: string, enum: [start, stop, delete] }
+      responses:
+        '200': { description: عملیات انجام شد }
+
+  /api/logs:
+    get:
+      summary: لاگ‌های سراسری اخیر
+      responses:
+        '200': { description: لیست لاگ‌ها }
+
+  /api/connections/{id}/logs:
+    get:
+      summary: لاگ‌های یک پل مشخص
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: لیست لاگ‌ها }
+
+  /api/system-metrics:
+    get:
+      summary: متریک واقعی سرور (CPU/RAM) — فاز ۳الف
+      responses:
+        '200': { description: مقادیر متریک }
+
+  /api/uptime-history:
+    get:
+      summary: تاریخچه‌ی ساعتی سلامت پل‌ها (تا ۷۲۰ ساعت گذشته) — فاز ۳ب
+      parameters:
+        - in: query
+          name: hours
+          schema: { type: integer, default: 24, minimum: 1, maximum: 168 }
+      responses:
+        '200': { description: آرایه‌ی نمونه‌های ساعتی }
+
+  /api/scheduled-posts:
+    get:
+      summary: لیست پست‌های زمان‌بندی‌شده‌ی کتابخانه‌ی محتوا — فاز ۳ب
+      parameters:
+        - in: query
+          name: connectionId
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: لیست پست‌ها
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  posts:
+                    type: array
+                    items: { $ref: '#/components/schemas/ScheduledPost' }
+    post:
+      summary: زمان‌بندی یک پست متنی جدید
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connectionId, text, scheduledAt]
+              properties:
+                connectionId: { type: string }
+                text: { type: string, maxLength: 4096 }
+                scheduledAt: { type: string, format: date-time, description: 'باید در آینده باشد' }
+      responses:
+        '201': { description: پست زمان‌بندی شد }
+        '400': { description: ورودی نامعتبر یا زمان در گذشته }
+
+  /api/scheduled-posts/{id}:
+    delete:
+      summary: حذف/لغو یک پست زمان‌بندی‌شده
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: حذف موفق }
+        '404': { description: پست یافت نشد }
+
+  /api/backup:
+    get:
+      summary: خروجی کامل JSON از همه‌ی پل‌ها (پشتیبان‌گیری)
+      responses:
+        '200': { description: فایل بکاپ }
+
+  /api/restore:
+    post:
+      summary: بازیابی از یک فایل بکاپ JSON
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connections]
+              properties:
+                connections: { type: array, items: { type: object } }
+                mode: { type: string, enum: [merge, overwrite], default: merge }
+      responses:
+        '200': { description: بازیابی موفق }

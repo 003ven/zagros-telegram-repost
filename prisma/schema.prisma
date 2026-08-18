@@ -1,0 +1,104 @@
+// Prisma schema — فاز ۱ نقشه‌راه (references/roadmap.md در اسکیل پروژه).
+//
+// چرا فقط Connection و LogEntry اینجا هستند و نه حساب ادمین/session؟
+// عمدی است: این دو مدل همان چیزی بودند که واقعاً از محدودیت فایل JSON
+// تخت رنج می‌بردند (بدون تراکنش، بدون ایندکس، race condition واقعی
+// روی نوشتن هم‌زمان). حساب ادمین و session (src/server/auth.ts) فعلاً
+// دست‌نخورده مانده — نه به‌خاطر چندکاربری آینده (که رسماً رد شده، نگاه
+// کن به references/roadmap.md)، بلکه صرفاً چون مهاجرت این دو کافی بود
+// و migration ریسک کمتری داشت اگر این افزایش کوچک بماند.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Connection {
+  id              String   @id
+  sourceChannel   String
+  targetChannel   String
+  botToken        String
+  status          String   // 'active' | 'inactive' | 'error'
+  lastMessageId   Int?
+  lastReceivedAt  DateTime?
+  transferredCount Int     @default(0)
+  createdAt       DateTime
+  updatedAt       DateTime
+  lastError       String?
+  consecutiveErrors Int    @default(0)
+  pollIntervalMs  Int      @default(15000)
+  // شکل کامل TelegramConnectionConfig (src/schemas.ts) به‌صورت JSON —
+  // چون این شمای زودتغییر است (فیلد جدید هر بار طبق
+  // references/extension-recipes.md اضافه می‌شود)، ستون‌بندی جدا برای
+  // هر فیلد config فایده‌ای ندارد و فقط مهاجرت آینده را سخت می‌کند.
+  config          Json
+
+  @@index([status])
+}
+
+model LogEntry {
+  id           String   @id @default(cuid())
+  // 'system' یک مقدار خاص (نه یک id واقعی پل) برای رویدادهای سراسری
+  // است (مثلاً حذف دسته‌جمعی، بازیابی بکاپ) — به همین دلیل این ستون
+  // یک foreign key واقعی به Connection نیست (مقدار 'system' با هیچ
+  // ردیف Connection مطابقت ندارد و باعث خطای FK می‌شد). حذف مرتبط با
+  // یک پل، دستی در Storage.deleteConnection انجام می‌شود (همان‌طور که
+  // نسخه‌ی قبلی مبتنی بر JSON هم دستی فیلتر می‌کرد).
+  connectionId String
+  timestamp    DateTime @default(now())
+  type         String   // 'info' | 'success' | 'warning' | 'error'
+  message      String
+  details      String?
+
+  @@index([connectionId, timestamp])
+}
+
+// فاز ۳ (references/roadmap.md): تشخیص محتوای تکراری. هر بار که پستی
+// با موفقیت ارسال می‌شود (و skipDuplicateContent برای آن پل فعال است)،
+// هش متن نهایی‌اش اینجا ذخیره می‌شود؛ دفعه‌ی بعد قبل از ارسال چک
+// می‌شود که آیا این هش برای همین پل اخیراً دیده شده یا نه.
+model SentContentHash {
+  id           String   @id @default(cuid())
+  connectionId String
+  contentHash  String
+  sentAt       DateTime @default(now())
+
+  @@index([connectionId, contentHash])
+  @@index([sentAt])
+}
+
+// فاز ۳ب: نمودار Uptime واقعی. هر چند دقیقه یک بار (نگاه کن به
+// startUptimeSampler در server.ts) یک نمونه ثبت می‌شود: از کل پل‌های
+// فعال/error، چند درصدشان سالم بودند (status !== 'error'). نمودار
+// فرانت (UptimeChart.tsx) این‌ها را به‌صورت میانگین ساعتی نمایش می‌دهد.
+model UptimeSample {
+  id           String   @id @default(cuid())
+  timestamp    DateTime @default(now())
+  healthyCount Int
+  totalCount   Int
+
+  @@index([timestamp])
+}
+
+// فاز ۳ب: کتابخانه‌ی محتوا — پست‌های متنی که کاربر دستی می‌نویسد و
+// برای یک زمان مشخص در آینده زمان‌بندی می‌کند (مستقل از پایپ‌لاین
+// ریپوست خودکار). به یک Connection موجود وصل است چون از همان
+// botToken/targetChannel آن استفاده می‌کند — پل جداگانه‌ای برای «فقط
+// پست دستی» لازم نیست بسازید.
+model ScheduledPost {
+  id           String    @id @default(cuid())
+  connectionId String
+  text         String
+  scheduledAt  DateTime
+  status       String    @default("pending") // 'pending' | 'sent' | 'failed' | 'canceled'
+  createdAt    DateTime  @default(now())
+  sentAt       DateTime?
+  error        String?
+
+  @@index([status, scheduledAt])
+  @@index([connectionId])
+}

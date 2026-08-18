@@ -1,0 +1,90 @@
+networks:
+  zagros-repost-net:
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zagros-repost-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zagros
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zagros_change_me}
+      POSTGRES_DB: zagros_repost
+    volumes:
+      - zagros-postgres-data:/var/lib/postgresql/data
+    networks:
+      - zagros-repost-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zagros -d zagros_repost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # این سرویس فقط داخل شبکه‌ی Docker در دسترس است (بدون ports:)،
+    # چون app مستقیم با DATABASE_URL داخلی به آن وصل می‌شود. اگر
+    # می‌خواهید از بیرون (مثلاً با یک ابزار GUI روی سیستم خودتان) به آن
+    # وصل شوید، یک خط `ports: ["5432:5432"]` اضافه کنید.
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zagros-repost-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://zagros:${POSTGRES_PASSWORD:-zagros_change_me}@postgres:5432/zagros_repost
+      # DATA_DIR فعلاً فقط برای حساب ادمین/session است (auth.ts هنوز به
+      # Postgres منتقل نشده — تصمیم عمدی فاز ۱، نگاه کن به
+      # references/roadmap.md). پل‌ها/لاگ‌ها از الان روی Postgres بالا هستند.
+      DATA_DIR: /data
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ADMIN_RECOVERY_KEY: ${ADMIN_RECOVERY_KEY:-}
+      USERBOT_SERVICE_URL: http://userbot:8081
+      USERBOT_SECRET: ${USERBOT_SECRET:-}
+      USERBOT_RELAY_CHANNEL: ${USERBOT_RELAY_CHANNEL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - zagros-data:/data
+    networks:
+      - zagros-repost-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      userbot:
+        condition: service_started
+
+  # سرویس اختیاری Python/Telethon — دو نقش (نگاه کن به بالای
+  # userbot/userbot_service.py): ۱) ریپوست فایل‌هایی که لینک دانلود
+  # مستقیم ندارند، ۲) [فاز ۲] موتور push-based کشف پیام زنده (به‌جای
+  # اسکرِیپ HTML دوره‌ای). اگر این سرویس را حذف کنید یا API_ID/API_HASH
+  # را خالی بگذارید، برنامه خودکار به همان اسکرِیپ قدیمی fallback
+  # می‌کند — چیزی نمی‌شکند.
+  userbot:
+    build:
+      context: ./userbot
+      dockerfile: Dockerfile
+    container_name: zagros-repost-userbot
+    restart: unless-stopped
+    environment:
+      API_ID: ${TELEGRAM_API_ID:-}
+      API_HASH: ${TELEGRAM_API_HASH:-}
+      USERBOT_SECRET: ${USERBOT_SECRET:-}
+      # [فاز ۲] آدرس داخلی app در همین شبکه‌ی Docker — اگر این تنظیم
+      # نشود، سرویس فقط به همان endpoint قدیمی /forward جواب می‌دهد و
+      # موتور push غیرفعال می‌ماند.
+      NODE_WEBHOOK_URL: http://app:3000
+    volumes:
+      # فایل session باید از قبل با `python login.py` (خارج از Docker یا
+      # با یک اجرای تعاملی جدا) ساخته شده باشد؛ این سرویس فقط از آن
+      # استفاده می‌کند، نمی‌سازدش (چون login نیاز به ورودی تعاملی SMS/۲FA دارد).
+      - ./userbot/userbot_session.session:/app/userbot_session.session
+    networks:
+      - zagros-repost-net
+
+volumes:
+  zagros-data:
+  zagros-postgres-data:
