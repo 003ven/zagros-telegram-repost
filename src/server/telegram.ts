@@ -11,8 +11,15 @@ import { getDefaultTelegramConnectionConfig, type IncomingPushMessage } from '..
 import { logger } from './logger';
 import crypto from 'crypto';
 import https from 'https';
+import http from 'http';
 import { Readable } from 'stream';
 import FormData from 'form-data';
+// آدرس پایه‌ی Bot API — پیش‌فرض سرور ابری تلگرام، اما اگر
+// TELEGRAM_API_BASE_URL تنظیم شده باشد (Local Bot API Server، برای
+// دور زدن سقف ۵۰ مگابایتی آپلود استاندارد)، از آن استفاده می‌شود.
+function getTelegramApiBase(): string {
+  return (process.env.TELEGRAM_API_BASE_URL || 'https://api.telegram.org').replace(/\/$/, '');
+}
 
 export class TelegramService {
   private static activePollers: Map<string, NodeJS.Timeout> = new Map();
@@ -134,7 +141,7 @@ export class TelegramService {
     const cleanToken = token.trim();
 
     try {
-      const response = await fetch(`https://api.telegram.org/bot${cleanToken}/getMe`, {
+      const response = await fetch(`${getTelegramApiBase()}/bot${cleanToken}/getMe`, {
         signal: AbortSignal.timeout(8000),
       });
 
@@ -485,8 +492,16 @@ export class TelegramService {
     }
 
     // 1. Media Type Filter
+    // آلبوم عکس/سند (media_group / document_group) معادل مجاز بودن
+    // خودِ عکس/سند در نظر گرفته می‌شود.
     if (config.allowedMediaTypes && config.allowedMediaTypes.length > 0) {
-      if (!config.allowedMediaTypes.includes(message.mediaType)) {
+      const typeToCheck =
+        message.mediaType === 'media_group'
+          ? 'photo'
+          : message.mediaType === 'document_group'
+            ? 'document'
+            : message.mediaType;
+      if (!config.allowedMediaTypes.includes(typeToCheck) && !config.allowedMediaTypes.includes(message.mediaType)) {
         return {
           shouldSend: false,
           processedText: '',
@@ -624,8 +639,17 @@ export class TelegramService {
         signal: AbortSignal.timeout(25000),
       });
       if (!res.ok || !res.body) return null;
-
       const contentType = res.headers.get('content-type') || 'application/octet-stream';
+      // اگر سرور اسم واقعی فایل را در Content-Disposition فرستاده باشد
+      // (مثلاً برای اسناد apk/exe)، همان را نگه می‌داریم — چون فقط
+      // حدس‌زدن بر اساس content-type برای فایل‌های غیرعکس (که معمولاً
+      // application/octet-stream است) همیشه به‌غلط jpg برمی‌گشت.
+      let realFilename: string | null = null;
+      const disposition = res.headers.get('content-disposition');
+      if (disposition) {
+        const match = disposition.match(/filename="?([^";]+)"?/i);
+        if (match && match[1]) realFilename = match[1].trim();
+      }
       const ext = contentType.includes('png')
         ? 'png'
         : contentType.includes('gif')
@@ -639,7 +663,7 @@ export class TelegramService {
       // Web ReadableStream -> Node Readable, so it can be piped straight
       // into the multipart body we send to Telegram without buffering.
       const stream = Readable.fromWeb(res.body as any);
-      return { stream, filename: `media.${ext}`, contentType };
+      return { stream, filename: realFilename || `media.${ext}`, contentType };
     } catch {
       return null;
     }
@@ -670,8 +694,10 @@ export class TelegramService {
           });
         }
 
-        const req = https.request(
-          `https://api.telegram.org/bot${botToken}/${method}`,
+        const targetUrl = `${getTelegramApiBase()}/bot${botToken}/${method}`;
+        const httpModule = targetUrl.startsWith('http://') ? http : https;
+        const req = httpModule.request(
+          targetUrl,
           { method: 'POST', headers: form.getHeaders() },
           (res) => {
             let raw = '';
@@ -688,7 +714,7 @@ export class TelegramService {
           }
         );
 
-        req.setTimeout(60000, () => req.destroy(new Error('زمان ارسال به تلگرام به پایان رسید')));
+        req.setTimeout(1800000, () => req.destroy(new Error('زمان ارسال به تلگرام به پایان رسید')));
         req.on('error', (err) => resolve({ success: false, error: err.message }));
         form.pipe(req);
       } catch (err) {
@@ -713,7 +739,7 @@ export class TelegramService {
   ): Promise<{ success: boolean; error?: string }> {
     // Step 1 — fast path: let Telegram fetch the URL itself.
     try {
-      const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+      const res = await fetch(`${getTelegramApiBase()}/bot${botToken}/sendPhoto`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -774,7 +800,7 @@ export class TelegramService {
     replyMarkup?: { inline_keyboard: { text: string; url: string }[][] }
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+      const res = await fetch(`${getTelegramApiBase()}/bot${botToken}/${method}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -827,7 +853,7 @@ export class TelegramService {
         media: u,
         ...(i === 0 && caption ? { caption, parse_mode: parseMode } : {}),
       }));
-      const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMediaGroup`, {
+      const res = await fetch(`${getTelegramApiBase()}/bot${botToken}/sendMediaGroup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: targetChannel, media: urlDescriptors }),
@@ -872,6 +898,38 @@ export class TelegramService {
     );
     return result;
   }
+  private static async sendDocumentGroupDirect(
+    botToken: string,
+    targetChannel: string,
+    fileUrls: string[],
+    caption: string,
+    parseMode?: 'HTML'
+  ): Promise<{ success: boolean; error?: string }> {
+    const urls = fileUrls.slice(0, 10);
+    const opened = await Promise.all(urls.map((u) => TelegramService.openMediaStream(u)));
+    const validSources = opened.filter((s): s is NonNullable<typeof s> => s !== null);
+    if (validSources.length < 2) {
+      return { success: false, error: 'دریافت کافی از فایل‌های آلبوم سند ناموفق بود' };
+    }
+    const fileParts = validSources.map((s, i) => ({
+      fieldName: `file${i}`,
+      stream: s.stream,
+      filename: s.filename,
+      contentType: s.contentType,
+    }));
+    const mediaDescriptors = validSources.map((_, i) => ({
+      type: 'document',
+      media: `attach://file${i}`,
+      ...(i === 0 && caption ? { caption, parse_mode: parseMode } : {}),
+    }));
+    const result = await TelegramService.streamMultipartUpload(
+      botToken,
+      'sendMediaGroup',
+      { chat_id: targetChannel, media: JSON.stringify(mediaDescriptors) },
+      fileParts
+    );
+    return result;
+  }
 
   /**
    * Asks the local userbot service (a real Telegram user session, not the
@@ -897,8 +955,8 @@ export class TelegramService {
           message_id: messageId,
           relay_channel: relayChannel,
         }),
-        // فایل‌های بزرگ ممکنه چند دقیقه طول بکشن تا دانلود/آپلود بشن
-        signal: AbortSignal.timeout(180000),
+        // فایل‌های بزرگ (تا ۲ گیگ) ممکنه چند ده دقیقه طول بکشن تا دانلود/آپلود بشن
+        signal: AbortSignal.timeout(1800000),
       });
       const data = await res.json();
       if (data && data.success) {
@@ -944,12 +1002,12 @@ export class TelegramService {
       config.aiRewrite ||
       (config.aiTranslate && config.aiTranslate !== 'none');
 
-    if (!hasModifications && message.mediaType !== 'media_group') {
+    if (!hasModifications && message.mediaType !== 'media_group' && message.mediaType !== 'document_group') {
       // Try copyMessage (cheapest path — Telegram handles the media transfer
       // itself since it already has the source message; not used for albums
       // because copyMessage only copies a single message, not a whole group).
       try {
-        const copyUrl = `https://api.telegram.org/bot${botToken}/copyMessage`;
+        const copyUrl = `${getTelegramApiBase()}/bot${botToken}/copyMessage`;
         const response = await fetch(copyUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -991,6 +1049,23 @@ export class TelegramService {
       // fall through to text-only send below
     }
 
+    // Album of documents (apk/exe/conf/...)
+    if (message.mediaType === 'document_group' && message.mediaUrls && message.mediaUrls.length > 1) {
+      const result = await TelegramService.sendDocumentGroupDirect(
+        botToken,
+        targetChannel,
+        message.mediaUrls,
+        htmlToSend || textToSend || '',
+        htmlToSend ? 'HTML' : undefined
+      );
+      if (result.success) return result;
+      await Storage.addLog(
+        conn.id,
+        'warning',
+        'ارسال آلبوم سند ناموفق بود، در حال تلاش برای ارسال فقط متن',
+        result.error
+      );
+    }
     // Single photo
     if (message.mediaType === 'photo' && message.mediaUrls && message.mediaUrls.length > 0) {
       const result = await TelegramService.sendPhotoDirect(
@@ -1075,7 +1150,7 @@ export class TelegramService {
         let allOk = true;
         for (let i = 0; i < ids.length; i++) {
           try {
-            const copyRes = await fetch(`https://api.telegram.org/bot${botToken}/copyMessage`, {
+            const copyRes = await fetch(`${getTelegramApiBase()}/bot${botToken}/copyMessage`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1109,7 +1184,7 @@ export class TelegramService {
 
     // Default / fallback: sendMessage (text only)
     try {
-      const sendUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+      const sendUrl = `${getTelegramApiBase()}/bot${botToken}/sendMessage`;
       const res = await fetch(sendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1178,7 +1253,7 @@ export class TelegramService {
     const msgText = customText || `🤖 پیام تست اتوماسیون فاکس ریپوست\n\nاتصال کانال مبدأ (${conn.sourceChannel}) به کانال مقصد (${conn.targetChannel}) برپا است.`;
 
     try {
-      const sendUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+      const sendUrl = `${getTelegramApiBase()}/bot${botToken}/sendMessage`;
       const res = await fetch(sendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1643,19 +1718,15 @@ export class TelegramService {
     const mediaBaseUrl = (process.env.USERBOT_SERVICE_URL || '').replace(/\/$/, '');
     const toMediaUrl = (token: string) => `${mediaBaseUrl}/media/${token}`;
 
+    const isGroupType = payload.mediaType === 'media_group' || payload.mediaType === 'document_group';
     const mediaUrls: string[] =
-      payload.mediaType === 'media_group' && payload.mediaTokens && mediaBaseUrl
+      isGroupType && payload.mediaTokens && mediaBaseUrl
         ? payload.mediaTokens.map(toMediaUrl)
         : payload.mediaToken && mediaBaseUrl
           ? [toMediaUrl(payload.mediaToken)]
           : [];
-
-    // اگر آلبوم بود ولی در عمل فقط یک رسانه با موفقیت دانلود شد (مثلاً
-    // بقیه‌ی اعضا شکست خوردند)، به‌جای گم‌شدن پست در آبشار ارسال (که
-    // فقط media_group با ≥۲ آیتم را می‌شناسد)، آن را یک پست «عکس تکی»
-    // در نظر می‌گیریم تا حداقل همان یکی ارسال شود.
-    const effectiveMediaType =
-      payload.mediaType === 'media_group' && mediaUrls.length === 1 ? 'photo' : payload.mediaType;
+    const singleFallbackType = payload.mediaType === 'document_group' ? 'document' : 'photo';
+    const effectiveMediaType = isGroupType && mediaUrls.length === 1 ? singleFallbackType : payload.mediaType;
 
     const post: TelegramMessage = {
       id: payload.messageId,
@@ -1665,6 +1736,7 @@ export class TelegramService {
       mediaType: effectiveMediaType,
       mediaUrls,
       caption: null,
+      inlineKeyboard: (payload.buttons as { text: string; url: string }[][] | null) || undefined,
       publishedAt: payload.publishedAt || new Date().toISOString(),
     };
 

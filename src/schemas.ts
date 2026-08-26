@@ -34,6 +34,7 @@ export const MediaTypeSchema = z.enum([
   'gif',
   'sticker',
   'media_group',
+  'document_group',
 ]);
 
 const ALL_MEDIA_TYPES = MediaTypeSchema.options;
@@ -133,6 +134,7 @@ export const IncomingPushMessageSchema = z.object({
   // می‌فرستد (به‌جای اینکه هر عضو آلبوم یک پیام جدا با mediaToken تکی
   // باشد — که قبلاً باعث می‌شد آلبوم به چند پست جدا در مقصد تبدیل شود).
   mediaTokens: z.array(z.string()).optional(),
+  buttons: z.array(z.array(z.object({ text: z.string(), url: z.string() }))).nullable().optional(),
   publishedAt: z.string().nullable().optional(),
 });
 

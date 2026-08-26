@@ -37,6 +37,8 @@ import os
 import sys
 import time
 import uuid
+import mimetypes
+from PIL import Image
 from aiohttp import web, ClientSession
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError, ChannelPrivateError, UsernameNotOccupiedError
@@ -161,11 +163,40 @@ async def download_message_media(msg) -> str | None:
         return None
     if not path:
         return None
+    # اگر فایل عکس بود، آن را به baseline JPEG تبدیل می‌کنیم — چون
+    # Bot API تلگرام گاهی روی JPEGهای progressive با خطای
+    # IMAGE_PROCESS_FAILED رد می‌شود، به‌خصوص در sendMediaGroup.
+    if path.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+        try:
+            img = Image.open(path)
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            fixed_path = path.rsplit(".", 1)[0] + "_fixed.jpg"
+            img.save(fixed_path, "JPEG", quality=92, progressive=False)
+            path = fixed_path
+        except Exception as e:
+            print(f"⚠️ تبدیل عکس {msg.id} به baseline JPEG شکست خورد (فایل اصلی استفاده می‌شود): {e}")
     token = uuid.uuid4().hex
     media_tokens[token] = {"path": path, "expires_at": time.time() + MEDIA_TOKEN_TTL_SECONDS}
     return token
 
 
+def extract_inline_buttons(msg):
+    """دکمه‌های این‌لاین (فقط نوع URL — دکمه‌های callback به بات مبدأ
+    وابسته‌اند و در ریپست معنی ندارند) را به شکل [[{text,url}]] برمی‌گرداند،
+    یا اگر پیام دکمه نداشت None."""
+    if not getattr(msg, "buttons", None):
+        return None
+    rows = []
+    for row in msg.buttons:
+        row_out = []
+        for btn in row:
+            url = getattr(btn, "url", None)
+            if url:
+                row_out.append({"text": btn.text, "url": url})
+        if row_out:
+            rows.append(row_out)
+    return rows if rows else None
 async def push_single_message(channel_key: str, msg):
     """یک پیام تکی (بدون grouped_id) را همان لحظه پردازش و پوش می‌کند."""
     text = msg.message or ""
@@ -185,6 +216,7 @@ async def push_single_message(channel_key: str, msg):
             "html": html_text,
             "mediaType": detect_media_type(msg),
             "mediaToken": media_token,
+            "buttons": extract_inline_buttons(msg),
             "publishedAt": msg.date.isoformat() if msg.date else None,
         }
     )
@@ -192,17 +224,14 @@ async def push_single_message(channel_key: str, msg):
 
 async def flush_album(grouped_id: int):
     """بعد از پایان تأخیر debounce، همه‌ی اعضای جمع‌شده‌ی این آلبوم را
-    یک‌جا به‌عنوان یک media_group واحد پوش می‌کند."""
+    پوش می‌کند — عکس‌ها یک‌جا به‌عنوان آلبوم عکس، سندها (apk/exe/...)
+    یک‌جا به‌عنوان آلبوم سند، و بقیه (ویدیو/صدا/...) جدا و مستقل."""
     buffer = album_buffers.pop(grouped_id, None)
     album_timers.pop(grouped_id, None)
     if not buffer:
         return
-
     messages = sorted(buffer["messages"], key=lambda m: m.id)
     channel_key = buffer["channel_key"]
-
-    # کپشن آلبوم معمولاً فقط روی یکی از اعضا (اولین یا آخرین) است؛ اولین
-    # متن غیرخالی را به‌عنوان کپشن کل آلبوم در نظر می‌گیریم.
     caption_msg = next((m for m in messages if m.message), None)
     text = caption_msg.message if caption_msg else ""
     try:
@@ -213,31 +242,87 @@ async def flush_album(grouped_id: int):
         )
     except Exception:
         html_text = text
+    photo_messages = [m for m in messages if m.photo]
+    document_messages = [m for m in messages if not m.photo and detect_media_type(m) == "document"]
+    remaining_messages = [
+        m for m in messages if not m.photo and detect_media_type(m) != "document"
+    ]
 
-    media_tokens_list = []
-    for m in messages:
+    # --- آلبوم عکس ---
+    photo_tokens = []
+    for m in photo_messages:
         token = await download_message_media(m)
         if token:
-            media_tokens_list.append(token)
+            photo_tokens.append(token)
+    if len(photo_tokens) >= 2:
+        await push_to_node(
+            {
+                "sourceChannel": channel_key,
+                "messageId": messages[-1].id,
+                "groupedId": grouped_id,
+                "text": text,
+                "html": html_text,
+                "mediaType": "media_group",
+                "mediaTokens": photo_tokens,
+                "publishedAt": messages[0].date.isoformat() if messages[0].date else None,
+            }
+        )
+    elif len(photo_tokens) == 1:
+        only_photo_msg = photo_messages[0]
+        await push_to_node(
+            {
+                "sourceChannel": channel_key,
+                "messageId": messages[-1].id,
+                "groupedId": None,
+                "text": text,
+                "html": html_text,
+                "mediaType": "photo",
+                "mediaToken": photo_tokens[0],
+                "publishedAt": only_photo_msg.date.isoformat() if only_photo_msg.date else None,
+            }
+        )
 
-    if not media_tokens_list:
-        # هیچ رسانه‌ای دانلود نشد (همه شکست خوردند) — چیزی برای ارسال نیست.
-        return
+    # --- آلبوم سند (apk/exe/conf/...) ---
+    # کپشن آلبوم فقط روی یک نوع (معمولاً عکس) گذاشته می‌شود تا در
+    # کانال مقصد تکراری نشود؛ اگر عکسی در کار نبود، کپشن روی سندها می‌رود.
+    doc_caption_text = text if not photo_tokens else ""
+    doc_caption_html = html_text if not photo_tokens else ""
+    doc_tokens = []
+    for m in document_messages:
+        token = await download_message_media(m)
+        if token:
+            doc_tokens.append(token)
+    if len(doc_tokens) >= 2:
+        await push_to_node(
+            {
+                "sourceChannel": channel_key,
+                "messageId": messages[-1].id,
+                "groupedId": grouped_id,
+                "text": doc_caption_text,
+                "html": doc_caption_html,
+                "mediaType": "document_group",
+                "mediaTokens": doc_tokens,
+                "publishedAt": messages[0].date.isoformat() if messages[0].date else None,
+            }
+        )
+    elif len(doc_tokens) == 1:
+        only_doc_msg = document_messages[0]
+        await push_to_node(
+            {
+                "sourceChannel": channel_key,
+                "messageId": messages[-1].id,
+                "groupedId": None,
+                "text": doc_caption_text,
+                "html": doc_caption_html,
+                "mediaType": "document",
+                "mediaToken": doc_tokens[0],
+                "publishedAt": only_doc_msg.date.isoformat() if only_doc_msg.date else None,
+            }
+        )
 
-    await push_to_node(
-        {
-            "sourceChannel": channel_key,
-            "messageId": messages[-1].id,  # آخرین id عضو آلبوم، برای lastMessageId سمت Node
-            "groupedId": grouped_id,
-            "text": text,
-            "html": html_text,
-            "mediaType": "media_group",
-            "mediaTokens": media_tokens_list,
-            "publishedAt": messages[0].date.isoformat() if messages[0].date else None,
-        }
-    )
-
-
+    # --- بقیه (ویدیو/صدا/voice/gif) — جدا و مستقل ---
+    for m in remaining_messages:
+        await push_single_message(channel_key, m)
 async def schedule_album_flush(grouped_id: int):
     """اگر تایمر قبلی برای همین آلبوم در جریان بود، لغوش می‌کند و یک
     تایمر تازه می‌سازد — یعنی «فقط وقتی ALBUM_COLLECT_DELAY_SECONDS از
@@ -493,7 +578,13 @@ async def handle_media(request: web.Request) -> web.Response:
     info = media_tokens.get(token)
     if not info or info["expires_at"] < time.time():
         return web.json_response({"success": False, "error": "token نامعتبر یا منقضی‌شده"}, status=404)
-    return web.FileResponse(info["path"])
+    real_filename = os.path.basename(info["path"])
+    guessed_type, _ = mimetypes.guess_type(real_filename)
+    resp = web.FileResponse(info["path"])
+    resp.headers["Content-Disposition"] = f'attachment; filename="{real_filename}"'
+    if guessed_type:
+        resp.content_type = guessed_type
+    return resp
 
 
 async def main():

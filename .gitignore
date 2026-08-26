@@ -22,3 +22,5 @@ userbot/__pycache__/
 .DS_Store
 *.swp
 data/
+# فایل کانفیگ pm2 یوزربات — شامل API_HASH و USERBOT_SECRET خام است
+userbot/ecosystem.userbot.config.cjs
