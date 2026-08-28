@@ -1,5 +1,5 @@
 import React from 'react';
-import { Send, RefreshCw, Plus, Radio, LogOut, Terminal, Sun, Moon, User, Database, CalendarClock } from 'lucide-react';
+import { Send, RefreshCw, Plus, Radio, LogOut, Terminal, Sun, Moon, Database, CalendarClock } from 'lucide-react';
 
 interface HeaderProps {
   activeCount: number;
@@ -7,7 +7,6 @@ interface HeaderProps {
   onRefresh: () => void;
   loading: boolean;
   onOpenGlobalLogs?: () => void;
-  onOpenAccountModal?: () => void;
   onOpenBackupModal?: () => void;
   onOpenContentLibrary?: () => void;
   showAddForm: boolean;
@@ -23,7 +22,6 @@ export const Header: React.FC<HeaderProps> = ({
   onRefresh,
   loading,
   onOpenGlobalLogs,
-  onOpenAccountModal,
   onOpenBackupModal,
   onOpenContentLibrary,
   showAddForm,
@@ -112,16 +110,6 @@ export const Header: React.FC<HeaderProps> = ({
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-orange-400' : ''}`} />
           </button>
 
-          {/* Account Info Button */}
-          {onOpenAccountModal && (
-            <button
-              onClick={onOpenAccountModal}
-              className="p-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 transition-all cursor-pointer"
-              title="اطلاعات حساب کاربری"
-            >
-              <User className="w-4 h-4" />
-            </button>
-          )}
 
           {/* Logout button */}
           {onLogout && (

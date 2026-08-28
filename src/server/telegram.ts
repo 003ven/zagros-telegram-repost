@@ -478,7 +478,7 @@ export class TelegramService {
   public static async processAndFilterPost(
     conn: TelegramConnection,
     message: TelegramMessage
-  ): Promise<{ shouldSend: boolean; processedText: string; processedHtml?: string; reason?: string }> {
+  ): Promise<{ shouldSend: boolean; processedText: string; processedHtml?: string; reason?: string; processedInlineKeyboard?: { text: string; url: string }[][] }> {
     const config = conn.config || TelegramService.getDefaultConfig();
 
     // 0. Active Schedule Filter
@@ -550,6 +550,19 @@ export class TelegramService {
     if (config.removeLinks) {
       text = text.replace(/https?:\/\/[^\s]+/gi, '').replace(/t\.me\/[^\s]+/gi, '');
     }
+    // 5b. Link Replace Rules (فقط روی خودِ URLهای داخل متن)
+    if (config.linkReplaceRules && config.linkReplaceRules.length > 0) {
+      text = text.replace(/https?:\/\/[^\s]+/gi, (url) => {
+        let newUrl = url;
+        for (const rule of config.linkReplaceRules) {
+          if (rule.search) {
+            const reg = new RegExp(rule.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            newUrl = newUrl.replace(reg, rule.replace || '');
+          }
+        }
+        return newUrl;
+      });
+    }
 
     // 6. Remove Mentions (@username)
     if (config.removeMentions) {
@@ -584,6 +597,7 @@ export class TelegramService {
     const canPreserveFormatting =
       !(config.replaceRules && config.replaceRules.length > 0) &&
       !config.removeLinks &&
+      !(config.linkReplaceRules && config.linkReplaceRules.length > 0) &&
       !config.aiRewrite &&
       (!config.aiTranslate || config.aiTranslate === 'none');
 
@@ -601,11 +615,44 @@ export class TelegramService {
       }
       processedHtml = sanitized.trim();
     }
-
+    // 9. Inline Buttons — حذف کامل یا جایگزینی لینک دکمه‌ها
+    let processedInlineKeyboard: { text: string; url: string }[][] | undefined = message.inlineKeyboard;
+    if (config.removeInlineButtons) {
+      processedInlineKeyboard = undefined;
+    } else if (config.buttonReplaceRules && config.buttonReplaceRules.length > 0 && message.inlineKeyboard) {
+      processedInlineKeyboard = message.inlineKeyboard.map((row) =>
+        row.map((btn) => {
+          let newUrl = btn.url;
+          for (const rule of config.buttonReplaceRules) {
+            if (rule.search) {
+              const reg = new RegExp(rule.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+              newUrl = newUrl.replace(reg, rule.replace || '');
+            }
+          }
+          return { ...btn, url: newUrl };
+        })
+      );
+    }
+    // 10. Custom Buttons — دکمه‌های سفارشی به همه‌ی پست‌های این پل اضافه می‌شوند
+    if (config.customButtons && config.customButtons.length > 0) {
+      const customRows: { text: string; url: string }[][] = [];
+      for (const btn of config.customButtons) {
+        if (!btn.text || !btn.url) continue;
+        if (btn.newRow || customRows.length === 0) {
+          customRows.push([{ text: btn.text, url: btn.url }]);
+        } else {
+          customRows[customRows.length - 1].push({ text: btn.text, url: btn.url });
+        }
+      }
+      if (customRows.length > 0) {
+        processedInlineKeyboard = [...(processedInlineKeyboard || []), ...customRows];
+      }
+    }
     return {
       shouldSend: true,
       processedText: finalText,
       processedHtml,
+      processedInlineKeyboard,
     };
   }
 
@@ -1494,9 +1541,13 @@ export class TelegramService {
       }
     }
 
+    const postToSend: TelegramMessage = {
+      ...post,
+      inlineKeyboard: processResult.processedInlineKeyboard,
+    };
     const sendResult = await TelegramService.forwardMessageToTarget(
       conn,
-      post,
+      postToSend,
       processResult.processedText,
       processResult.processedHtml
     );

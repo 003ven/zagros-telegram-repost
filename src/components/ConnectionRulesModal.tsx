@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { TelegramConnection, ReplaceRule, TelegramConnectionConfig } from '../types';
+import { TelegramConnection, ReplaceRule, TelegramConnectionConfig, TelegramMessage } from '../types';
 import { getDefaultConnectionConfig } from '../lib/defaultConnectionConfig';
+import { apiFetch } from '../lib/api';
 import { PERSIAN_DAY_NAMES, PERSIAN_WEEK_ORDER } from '../lib/persianDays';
 import {
   X,
@@ -25,6 +26,7 @@ import {
   Save,
   Download,
   Copy,
+  MousePointerClick,
 } from 'lucide-react';
 
 interface Preset {
@@ -140,6 +142,23 @@ export const ConnectionRulesModal: React.FC<Props> = ({
   // Clean state
   const [removeLinks, setRemoveLinks] = useState(currentConfig.removeLinks || false);
   const [removeMentions, setRemoveMentions] = useState(currentConfig.removeMentions || false);
+  const [removeInlineButtons, setRemoveInlineButtons] = useState(currentConfig.removeInlineButtons || false);
+  const [linkReplaceRules, setLinkReplaceRules] = useState<ReplaceRule[]>(currentConfig.linkReplaceRules || []);
+  const [buttonReplaceRules, setButtonReplaceRules] = useState<ReplaceRule[]>(currentConfig.buttonReplaceRules || []);
+  const [newLinkSearch, setNewLinkSearch] = useState('');
+  const [newLinkReplace, setNewLinkReplace] = useState('');
+  const [newButtonSearch, setNewButtonSearch] = useState('');
+  const [newButtonReplace, setNewButtonReplace] = useState('');
+  const [detectedLinks, setDetectedLinks] = useState<string[]>([]);
+  const [detectedButtons, setDetectedButtons] = useState<string[]>([]);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
+  const [customButtons, setCustomButtons] = useState<
+    { id: string; text: string; url: string; newRow: boolean }[]
+  >(currentConfig.customButtons || []);
+  const [newBtnText, setNewBtnText] = useState('');
+  const [newBtnUrl, setNewBtnUrl] = useState('');
+  const [newBtnSameRow, setNewBtnSameRow] = useState(false);
   const [skipDuplicateContent, setSkipDuplicateContent] = useState(currentConfig.skipDuplicateContent || false);
   const [webhookUrl, setWebhookUrl] = useState(currentConfig.webhookUrl || '');
   const [customHeader, setCustomHeader] = useState(currentConfig.customHeader || '');
@@ -214,6 +233,89 @@ export const ConnectionRulesModal: React.FC<Props> = ({
   const handleRemoveRule = (id: string) => {
     setReplaceRules(replaceRules.filter((r) => r.id !== id));
   };
+  const handleAddLinkRule = () => {
+    if (!newLinkSearch.trim()) return;
+    setLinkReplaceRules([
+      ...linkReplaceRules,
+      { id: Math.random().toString(36).substring(2, 9), search: newLinkSearch.trim(), replace: newLinkReplace.trim() },
+    ]);
+    setNewLinkSearch('');
+    setNewLinkReplace('');
+  };
+  const handleRemoveLinkRule = (id: string) => {
+    setLinkReplaceRules(linkReplaceRules.filter((r) => r.id !== id));
+  };
+  const handleAddButtonRule = () => {
+    if (!newButtonSearch.trim()) return;
+    setButtonReplaceRules([
+      ...buttonReplaceRules,
+      { id: Math.random().toString(36).substring(2, 9), search: newButtonSearch.trim(), replace: newButtonReplace.trim() },
+    ]);
+    setNewButtonSearch('');
+    setNewButtonReplace('');
+  };
+  const handleRemoveButtonRule = (id: string) => {
+    setButtonReplaceRules(buttonReplaceRules.filter((r) => r.id !== id));
+  };
+  const handleAddCustomButton = () => {
+    if (!newBtnText.trim() || !newBtnUrl.trim()) return;
+    setCustomButtons([
+      ...customButtons,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        text: newBtnText.trim(),
+        url: newBtnUrl.trim(),
+        newRow: !newBtnSameRow,
+      },
+    ]);
+    setNewBtnText('');
+    setNewBtnUrl('');
+    setNewBtnSameRow(false);
+  };
+  const handleRemoveCustomButton = (id: string) => {
+    setCustomButtons(customButtons.filter((b) => b.id !== id));
+  };
+  const handleDetectLinksAndButtons = async () => {
+    if (!connection?.sourceChannel) return;
+    setIsDetecting(true);
+    setDetectError(null);
+    try {
+      const res = await apiFetch('/api/connections/preview-channel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: connection.sourceChannel }),
+      });
+      const data = await res.json();
+      if (!data.success || !data.result?.messages) {
+        setDetectError('دریافت پست‌های نمونه از کانال مبدأ ناموفق بود.');
+        return;
+      }
+      const linkSet = new Set<string>();
+      const buttonSet = new Set<string>();
+      const urlRegex = /https?:\/\/[^\s"'<>]+/gi;
+      for (const msg of data.result.messages as TelegramMessage[]) {
+        const source = msg.htmlText || msg.text || '';
+        const found = source.match(urlRegex);
+        if (found) found.forEach((u) => linkSet.add(u.replace(/[.,;:!?)"'<]+$/, '')));
+        if (msg.inlineKeyboard) {
+          for (const row of msg.inlineKeyboard) {
+            for (const btn of row) {
+              if (btn.url) buttonSet.add(btn.url);
+            }
+          }
+        }
+      }
+      setDetectedLinks(Array.from(linkSet));
+      setDetectedButtons(Array.from(buttonSet));
+      if (linkSet.size === 0 && buttonSet.size === 0) {
+        setDetectError('در پست‌های اخیر این کانال هیچ لینک یا دکمه‌ای پیدا نشد.');
+      }
+    } catch {
+      setDetectError('خطا در ارتباط با سرور هنگام شناسایی لینک‌ها.');
+    } finally {
+      setIsDetecting(false);
+    }
+  };
 
   const toggleMediaType = (type: string) => {
     if (allowedMediaTypes.includes(type)) {
@@ -228,6 +330,9 @@ export const ConnectionRulesModal: React.FC<Props> = ({
     if (cfg.replaceRules) setReplaceRules(cfg.replaceRules);
     if (cfg.removeLinks !== undefined) setRemoveLinks(cfg.removeLinks);
     if (cfg.removeMentions !== undefined) setRemoveMentions(cfg.removeMentions);
+    if (cfg.removeInlineButtons !== undefined) setRemoveInlineButtons(cfg.removeInlineButtons);
+    if (cfg.linkReplaceRules) setLinkReplaceRules(cfg.linkReplaceRules);
+    if (cfg.buttonReplaceRules) setButtonReplaceRules(cfg.buttonReplaceRules);
     if (cfg.skipDuplicateContent !== undefined) setSkipDuplicateContent(cfg.skipDuplicateContent);
     if (cfg.webhookUrl !== undefined) setWebhookUrl(cfg.webhookUrl);
     if (cfg.customHeader !== undefined) setCustomHeader(cfg.customHeader);
@@ -329,6 +434,10 @@ export const ConnectionRulesModal: React.FC<Props> = ({
       replaceRules,
       removeLinks,
       removeMentions,
+      removeInlineButtons,
+      linkReplaceRules,
+      buttonReplaceRules,
+      customButtons,
       skipDuplicateContent,
       webhookUrl,
       customHeader,
@@ -710,6 +819,24 @@ export const ConnectionRulesModal: React.FC<Props> = ({
                 </div>
 
                 <div
+                  onClick={() => setRemoveInlineButtons(!removeInlineButtons)}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all flex items-start gap-3 ${
+                    removeInlineButtons
+                      ? 'bg-orange-500/10 border-orange-500/40 text-white'
+                      : 'bg-[#18181b] border-white/10 text-white/60 hover:border-white/20'
+                  }`}
+                >
+                  <div className={`p-2 rounded-lg ${removeInlineButtons ? 'bg-orange-500 text-white' : 'bg-white/10'}`}>
+                    <MousePointerClick className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-white mb-1">حذف تمام دکمه‌های این‌لاین</h4>
+                    <p className="text-[11px] text-white/50">
+                      دکمه‌های زیر پست (مثل لینک عضویت یا کانال) به‌طور کامل حذف می‌شوند.
+                    </p>
+                  </div>
+                </div>
+                <div
                   onClick={() => setSkipDuplicateContent(!skipDuplicateContent)}
                   className={`p-4 rounded-xl border cursor-pointer transition-all flex items-start gap-3 ${
                     skipDuplicateContent
@@ -749,7 +876,271 @@ export const ConnectionRulesModal: React.FC<Props> = ({
                   />
                 </div>
               </div>
+              {/* Auto-Detect Links & Buttons */}
+              <div className="p-4 rounded-xl border bg-[#18181b] border-white/10 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-lg bg-white/10">
+                      <Globe className="w-4 h-4 text-white/60" />
+                    </div>
+                    <h4 className="text-xs font-bold text-white">شناسایی خودکار لینک‌ها و دکمه‌ها</h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDetectLinksAndButtons}
+                    disabled={isDetecting || !connection?.sourceChannel}
+                    className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isDetecting ? 'animate-spin' : ''}`} />
+                    {isDetecting ? 'در حال بررسی...' : 'بررسی پست‌های اخیر'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-white/50">
+                  چند پست اخیر کانال مبدأ را می‌خواند و همه‌ی لینک‌های داخل متن و آدرس دکمه‌ها را پیدا می‌کند — روی هرکدام کلیک کنید تا در فرم مربوطه پر شود.
+                </p>
+                {detectError && (
+                  <p className="text-[11px] text-red-400">{detectError}</p>
+                )}
+                {detectedLinks.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-white/40">لینک‌های متن یافت‌شده:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {detectedLinks.map((link) => (
+                        <button
+                          key={link}
+                          type="button"
+                          onClick={() => setNewLinkSearch(link)}
+                          className="px-2 py-1 bg-orange-500/10 border border-orange-500/20 text-orange-300 text-[10px] font-mono-code rounded-md hover:bg-orange-500/20 max-w-[220px] truncate"
+                          title={link}
+                        >
+                          {link}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {detectedButtons.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-white/40">لینک دکمه‌های یافت‌شده:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {detectedButtons.map((link) => (
+                        <button
+                          key={link}
+                          type="button"
+                          onClick={() => setNewButtonSearch(link)}
+                          className="px-2 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-300 text-[10px] font-mono-code rounded-md hover:bg-blue-500/20 max-w-[220px] truncate"
+                          title={link}
+                        >
+                          {link}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {/* Link Replace Rules — مدیریت لینک‌های داخل متن */}
+              <div className="p-4 rounded-xl border bg-[#18181b] border-white/10 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-white/10">
+                    <Link className="w-4 h-4 text-white/60" />
+                  </div>
+                  <h4 className="text-xs font-bold text-white">مدیریت لینک‌های داخل متن پست</h4>
+                </div>
+                <p className="text-[11px] text-white/50">
+                  فقط روی خودِ آدرس‌های (URL) داخل متن پست اعمال می‌شود — هر عبارتی که در بخشی از یک لینک پیدا شود با مقدار جایگزین (یا خالی برای حذف آن بخش) عوض می‌شود.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={newLinkSearch}
+                    onChange={(e) => setNewLinkSearch(e.target.value)}
+                    placeholder="مثلاً t.me/oldchannel"
+                    className="w-full px-3 py-2 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white focus:outline-none focus:border-orange-500"
+                  />
+                  <input
+                    type="text"
+                    value={newLinkReplace}
+                    onChange={(e) => setNewLinkReplace(e.target.value)}
+                    placeholder="t.me/mychannel (یا خالی برای حذف)"
+                    className="w-full px-3 py-2 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddLinkRule}
+                  disabled={!newLinkSearch.trim()}
+                  className="w-full py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-medium text-xs rounded-lg flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  افزودن قانون لینک
+                </button>
+                {linkReplaceRules.length > 0 && (
+                  <div className="space-y-2 max-h-32 overflow-y-auto">
+                    {linkReplaceRules.map((rule) => (
+                      <div
+                        key={rule.id}
+                        className="flex items-center justify-between p-2 rounded-lg bg-[#0a0a0a] border border-white/10 text-xs"
+                      >
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <span className="font-mono-code text-orange-400 truncate">{rule.search}</span>
+                          <span className="text-white/40">➔</span>
+                          <span className="font-mono-code text-emerald-400 truncate">{rule.replace || '(حذف)'}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLinkRule(rule.id)}
+                          className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/10 rounded shrink-0"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* Button Replace Rules — مدیریت لینک دکمه‌های این‌لاین */}
+              <div className="p-4 rounded-xl border bg-[#18181b] border-white/10 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-white/10">
+                    <MousePointerClick className="w-4 h-4 text-white/60" />
+                  </div>
+                  <h4 className="text-xs font-bold text-white">مدیریت لینک دکمه‌های این‌لاین</h4>
+                </div>
+                <p className="text-[11px] text-white/50">
+                  روی آدرس (URL) دکمه‌های زیر پست اعمال می‌شود — وقتی «حذف تمام دکمه‌های این‌لاین» فعال باشد، این قوانین نادیده گرفته می‌شوند.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={newButtonSearch}
+                    onChange={(e) => setNewButtonSearch(e.target.value)}
+                    placeholder="مثلاً t.me/oldbot"
+                    className="w-full px-3 py-2 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white focus:outline-none focus:border-orange-500"
+                  />
+                  <input
+                    type="text"
+                    value={newButtonReplace}
+                    onChange={(e) => setNewButtonReplace(e.target.value)}
+                    placeholder="t.me/mybot (یا خالی برای حذف)"
+                    className="w-full px-3 py-2 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddButtonRule}
+                  disabled={!newButtonSearch.trim()}
+                  className="w-full py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-medium text-xs rounded-lg flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  افزودن قانون دکمه
+                </button>
+                {buttonReplaceRules.length > 0 && (
+                  <div className="space-y-2 max-h-32 overflow-y-auto">
+                    {buttonReplaceRules.map((rule) => (
+                      <div
+                        key={rule.id}
+                        className="flex items-center justify-between p-2 rounded-lg bg-[#0a0a0a] border border-white/10 text-xs"
+                      >
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <span className="font-mono-code text-orange-400 truncate">{rule.search}</span>
+                          <span className="text-white/40">➔</span>
+                          <span className="font-mono-code text-emerald-400 truncate">{rule.replace || '(حذف)'}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveButtonRule(rule.id)}
+                          className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/10 rounded shrink-0"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
+              {/* Custom Buttons — دکمه‌های سفارشی برای همه‌ی پست‌ها */}
+              <div className="p-4 rounded-xl border bg-[#18181b] border-white/10 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-white/10">
+                    <Sparkles className="w-4 h-4 text-white/60" />
+                  </div>
+                  <h4 className="text-xs font-bold text-white">دکمه‌های سفارشی (به همه‌ی پست‌های این پل اضافه می‌شود)</h4>
+                </div>
+                <p className="text-[11px] text-white/50">
+                  این دکمه‌ها مستقل از دکمه‌های اصلی پست هستند و همیشه به انتهای پست ارسالی اضافه می‌شوند. تلگرام امکان تغییر رنگ دکمه را نمی‌دهد — فقط متن، لینک و چیدمان قابل تنظیم است.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={newBtnText}
+                    onChange={(e) => setNewBtnText(e.target.value)}
+                    placeholder="متن دکمه (مثلاً عضویت در کانال)"
+                    className="w-full px-3 py-2 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white focus:outline-none focus:border-orange-500"
+                  />
+                  <input
+                    type="text"
+                    value={newBtnUrl}
+                    onChange={(e) => setNewBtnUrl(e.target.value)}
+                    placeholder="https://t.me/yourchannel"
+                    dir="ltr"
+                    className="w-full px-3 py-2 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white text-left focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-[11px] text-white/60 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newBtnSameRow}
+                    onChange={(e) => setNewBtnSameRow(e.target.checked)}
+                    disabled={customButtons.length === 0}
+                    className="accent-orange-500"
+                  />
+                  کنار دکمه‌ی قبلی (همان ردیف) قرار بگیرد
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAddCustomButton}
+                  disabled={!newBtnText.trim() || !newBtnUrl.trim()}
+                  className="w-full py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-medium text-xs rounded-lg flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  افزودن دکمه
+                </button>
+                {customButtons.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-white/40">پیش‌نمایش چیدمان دکمه‌ها:</p>
+                    {(() => {
+                      const rows: typeof customButtons[] = [];
+                      customButtons.forEach((btn) => {
+                        if (btn.newRow || rows.length === 0) rows.push([btn]);
+                        else rows[rows.length - 1].push(btn);
+                      });
+                      return rows.map((row, rowIdx) => (
+                        <div key={rowIdx} className="flex flex-wrap gap-1.5">
+                          {row.map((btn) => (
+                            <div
+                              key={btn.id}
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0a0a0a] border border-blue-500/30 text-[11px]"
+                            >
+                              <span className="text-blue-300 font-medium">{btn.text}</span>
+                              <span className="text-white/30 font-mono-code text-[10px] max-w-[120px] truncate" dir="ltr">
+                                {btn.url}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCustomButton(btn.id)}
+                                className="text-red-400 hover:text-red-300"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                )}
+              </div>
               {/* Custom Header */}
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-white">

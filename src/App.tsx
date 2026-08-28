@@ -8,7 +8,6 @@ import { ConnectionRulesModal } from './components/ConnectionRulesModal';
 import { LoginForm } from './components/LoginForm';
 import { UptimeChart } from './components/UptimeChart';
 import { EditFooterModal, FooterLinksConfig } from './components/EditFooterModal';
-import { AccountModal } from './components/AccountModal';
 import { BackupModal } from './components/BackupModal';
 import { ContentLibraryModal } from './components/ContentLibraryModal';
 import { TelegramConnection, ConnectionCreateInput, TelegramConnectionConfig, LogEntry } from './types';
@@ -85,25 +84,6 @@ export default function App() {
     };
   });
   const [isEditFooterOpen, setIsEditFooterOpen] = useState(false);
-
-  // User Profile Account State
-  const [userName, setUserName] = useState<string>(() => {
-    try {
-      return localStorage.getItem('zagros_user') || 'کاربر زاگرس';
-    } catch {
-      return 'کاربر زاگرس';
-    }
-  });
-  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
-
-  const handleUpdateUserName = (newName: string) => {
-    setUserName(newName);
-    try {
-      localStorage.setItem('zagros_user', newName);
-    } catch {
-      // ignore
-    }
-  };
 
   const handleSaveFooterLinks = (newLinks: FooterLinksConfig) => {
     setFooterLinks(newLinks);
@@ -438,7 +418,6 @@ export default function App() {
         onToggleAddForm={() => setShowAddForm(!showAddForm)}
         theme={theme}
         onToggleTheme={handleToggleTheme}
-        onOpenAccountModal={() => setIsAccountModalOpen(true)}
         onOpenBackupModal={() => setIsBackupModalOpen(true)}
         onOpenContentLibrary={() => setIsContentLibraryOpen(true)}
         onLogout={handleLogout}
@@ -823,78 +802,7 @@ export default function App() {
         </section>
       </main>
 
-      {/* Footer Credits Bar (Editable) */}
-      <footer className="fixed bottom-0 inset-x-0 bg-[#0a0c10]/95 backdrop-blur-md border-t border-white/10 py-2.5 px-4 text-[11px] text-white/60 z-20">
-        <div className="max-w-4xl mx-auto flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-3">
-            <span className="text-white/50 font-bold">زاگرس ریپوست</span>
-            <span className="text-white/20">|</span>
-            {footerLinks.supportUrl ? (
-              <a
-                href={footerLinks.supportUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-400 hover:underline flex items-center gap-1"
-              >
-                <MessageCircle className="w-3.5 h-3.5" />
-                <span>{footerLinks.supportLabel}</span>
-              </a>
-            ) : (
-              <span className="text-white/50">{footerLinks.supportLabel}</span>
-            )}
-          </div>
 
-          <div className="flex items-center gap-3">
-            {footerLinks.telegramUrl && (
-              <a
-                href={footerLinks.telegramUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-400 hover:underline bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded flex items-center gap-1"
-              >
-                <Send className="w-3 h-3" />
-                <span>{footerLinks.telegramLabel}</span>
-              </a>
-            )}
-
-            {footerLinks.instagramUrl && (
-              <a
-                href={footerLinks.instagramUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-pink-400 hover:underline bg-pink-500/10 border border-pink-500/20 px-2 py-0.5 rounded flex items-center gap-1"
-              >
-                <Instagram className="w-3 h-3" />
-                <span>{footerLinks.instagramLabel}</span>
-              </a>
-            )}
-
-            <button
-              onClick={() => setIsEditFooterOpen(true)}
-              className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-colors cursor-pointer"
-              title="ویرایش لینک‌های فوتر"
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      </footer>
-
-      {/* Editable Footer Links Modal */}
-      <EditFooterModal
-        isOpen={isEditFooterOpen}
-        onClose={() => setIsEditFooterOpen(false)}
-        initialConfig={footerLinks}
-        onSave={handleSaveFooterLinks}
-      />
-
-      {/* Account Info Modal */}
-      <AccountModal
-        isOpen={isAccountModalOpen}
-        onClose={() => setIsAccountModalOpen(false)}
-        userName={userName}
-        onUpdateUser={handleUpdateUserName}
-      />
 
       {/* Backup & Restore Modal */}
       <BackupModal

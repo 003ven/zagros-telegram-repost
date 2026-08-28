@@ -54,6 +54,18 @@ export const TelegramConnectionConfigSchema = z.object({
   replaceRules: z.array(ReplaceRuleSchema).default(() => []),
   removeLinks: z.boolean().default(false),
   removeMentions: z.boolean().default(false),
+  // مدیریت لینک‌های داخل متن (جدا از removeLinks/replaceRules عمومی) —
+  // فقط روی خودِ URLهای تشخیص‌داده‌شده در متن اعمال می‌شود.
+  linkReplaceRules: z.array(ReplaceRuleSchema).default(() => []),
+  // مدیریت دکمه‌های این‌لاین
+  removeInlineButtons: z.boolean().default(false),
+  buttonReplaceRules: z.array(ReplaceRuleSchema).default(() => []),
+  // دکمه‌های سفارشی — به همه‌ی پست‌های خروجی این پل اضافه می‌شوند
+  // (مستقل از حذف/جایگزینی دکمه‌های اصلی پست). newRow=true یعنی این
+  // دکمه یک ردیف جدید شروع می‌کند؛ false یعنی کنار دکمه‌ی قبلی می‌آید.
+  customButtons: z
+    .array(z.object({ id: z.string(), text: z.string(), url: z.string(), newRow: z.boolean().default(true) }))
+    .default(() => []),
   customHeader: z.string().default(''),
   customFooter: z.string().default(''),
   keywordsInclude: z.array(z.string()).default(() => []),
