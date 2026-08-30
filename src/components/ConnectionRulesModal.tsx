@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { TelegramConnection, ReplaceRule, TelegramConnectionConfig, TelegramMessage } from '../types';
 import { getDefaultConnectionConfig } from '../lib/defaultConnectionConfig';
 import { apiFetch } from '../lib/api';
+import { DEFAULT_CATEGORIES, getCustomCategories, addCustomCategory } from '../lib/categories';
 import { PERSIAN_DAY_NAMES, PERSIAN_WEEK_ORDER } from '../lib/persianDays';
 import {
   X,
@@ -159,6 +160,15 @@ export const ConnectionRulesModal: React.FC<Props> = ({
   const [newBtnText, setNewBtnText] = useState('');
   const [newBtnUrl, setNewBtnUrl] = useState('');
   const [newBtnSameRow, setNewBtnSameRow] = useState(false);
+  const [category, setCategory] = useState(currentConfig.category || 'سایر');
+  const [editSourceChannel, setEditSourceChannel] = useState(connection?.sourceChannel || '');
+  const [editTargetChannel, setEditTargetChannel] = useState(connection?.targetChannel || '');
+  const [editBotToken, setEditBotToken] = useState('');
+  const [isEditingChannels, setIsEditingChannels] = useState(false);
+  const [isSavingChannels, setIsSavingChannels] = useState(false);
+  const [channelsSaveError, setChannelsSaveError] = useState<string | null>(null);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
   const [skipDuplicateContent, setSkipDuplicateContent] = useState(currentConfig.skipDuplicateContent || false);
   const [webhookUrl, setWebhookUrl] = useState(currentConfig.webhookUrl || '');
   const [customHeader, setCustomHeader] = useState(currentConfig.customHeader || '');
@@ -274,6 +284,40 @@ export const ConnectionRulesModal: React.FC<Props> = ({
   };
   const handleRemoveCustomButton = (id: string) => {
     setCustomButtons(customButtons.filter((b) => b.id !== id));
+  };
+  const handleSaveChannels = async () => {
+    if (!connection) return;
+    setIsSavingChannels(true);
+    setChannelsSaveError(null);
+    try {
+      const res = await apiFetch(`/api/connections/${connection.id}/channels`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceChannel: editSourceChannel,
+          targetChannel: editTargetChannel,
+          botToken: editBotToken.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setChannelsSaveError(data.error || 'خطا در ذخیره تغییرات کانال‌ها');
+        return;
+      }
+      setIsEditingChannels(false);
+      setEditBotToken('');
+    } catch {
+      setChannelsSaveError('خطا در ارتباط با سرور');
+    } finally {
+      setIsSavingChannels(false);
+    }
+  };
+  const handleAddNewCategory = () => {
+    if (!newCategoryName.trim()) return;
+    addCustomCategory(newCategoryName.trim());
+    setCategory(newCategoryName.trim());
+    setNewCategoryName('');
+    setIsAddingCategory(false);
   };
   const handleDetectLinksAndButtons = async () => {
     if (!connection?.sourceChannel) return;
@@ -438,6 +482,7 @@ export const ConnectionRulesModal: React.FC<Props> = ({
       linkReplaceRules,
       buttonReplaceRules,
       customButtons,
+      category,
       skipDuplicateContent,
       webhookUrl,
       customHeader,
@@ -604,6 +649,144 @@ export const ConnectionRulesModal: React.FC<Props> = ({
           </div>
         )}
 
+        {/* Channel & Bot Editor — ویرایش کانال مبدأ/مقصد و توکن بات */}
+        {mode !== 'create' && connection && (
+          <div className="px-6 py-3 border-b border-white/10 bg-[#0e0e11]">
+            {!isEditingChannels ? (
+              <div className="flex items-center justify-between gap-3 text-[11px]">
+                <div className="flex items-center gap-3 text-white/60 overflow-hidden">
+                  <span className="font-mono-code text-orange-300 truncate" dir="ltr">{connection.sourceChannel}</span>
+                  <span className="text-white/30">➔</span>
+                  <span className="font-mono-code text-emerald-300 truncate" dir="ltr">{connection.targetChannel}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditSourceChannel(connection.sourceChannel);
+                    setEditTargetChannel(connection.targetChannel);
+                    setEditBotToken('');
+                    setChannelsSaveError(null);
+                    setIsEditingChannels(true);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 font-bold shrink-0 flex items-center gap-1"
+                >
+                  ویرایش کانال‌ها / توکن
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-white/50 mb-1">کانال مبدأ:</label>
+                    <input
+                      type="text"
+                      value={editSourceChannel}
+                      onChange={(e) => setEditSourceChannel(e.target.value)}
+                      dir="ltr"
+                      className="w-full px-3 py-1.5 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white text-left focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-white/50 mb-1">کانال مقصد:</label>
+                    <input
+                      type="text"
+                      value={editTargetChannel}
+                      onChange={(e) => setEditTargetChannel(e.target.value)}
+                      dir="ltr"
+                      className="w-full px-3 py-1.5 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white text-left focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-white/50 mb-1">توکن بات (اختیاری — فقط اگر می‌خواهید عوض شود):</label>
+                  <input
+                    type="text"
+                    value={editBotToken}
+                    onChange={(e) => setEditBotToken(e.target.value)}
+                    placeholder="خالی بگذارید تا توکن فعلی حفظ شود"
+                    dir="ltr"
+                    className="w-full px-3 py-1.5 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white text-left focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+                {channelsSaveError && <p className="text-[11px] text-red-400">{channelsSaveError}</p>}
+                <p className="text-[10px] text-amber-400/80">
+                  ⚠️ با تغییر کانال مبدأ، شماره‌ی آخرین پست شناسایی‌شده ریست می‌شود و مانیتورینگ دوباره از پست‌های جدید شروع می‌شود.
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveChannels}
+                    disabled={isSavingChannels || !editSourceChannel.trim() || !editTargetChannel.trim()}
+                    className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg"
+                  >
+                    {isSavingChannels ? 'در حال ذخیره...' : 'ذخیره'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setIsEditingChannels(false); setChannelsSaveError(null); }}
+                    className="px-3 py-1.5 text-white/50 hover:text-white text-[11px]"
+                  >
+                    انصراف
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {/* Category Selector — دسته‌بندی موضوعی این پل */}
+        <div className="px-6 py-3 border-b border-white/10 bg-[#0e0e11] flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-bold text-white/60 shrink-0">دسته‌بندی:</span>
+          {[...DEFAULT_CATEGORIES.filter((c) => !getCustomCategories().includes(c)), ...getCustomCategories()].map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setCategory(cat)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                category === cat
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/10'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+          {isAddingCategory ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddNewCategory()}
+                placeholder="نام دسته جدید"
+                autoFocus
+                className="px-2 py-1 text-[11px] bg-[#0a0a0a] border border-orange-500/40 rounded-lg text-white w-28 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={handleAddNewCategory}
+                className="px-2 py-1 bg-orange-500 hover:bg-orange-600 text-white text-[11px] rounded-lg"
+              >
+                افزودن
+              </button>
+              <button
+                type="button"
+                onClick={() => { setIsAddingCategory(false); setNewCategoryName(''); }}
+                className="px-2 py-1 text-white/40 hover:text-white text-[11px]"
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsAddingCategory(true)}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white/5 text-white/50 hover:bg-white/10 border border-dashed border-white/20 flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              دسته جدید
+            </button>
+          )}
+        </div>
         {/* Tab Navigation */}
         <div className="flex border-b border-white/10 bg-[#0e0e11] px-4 overflow-x-auto">
           <button

@@ -2,7 +2,8 @@
 // src/schemas.ts (شمای Zod) تا شکل داده، پیش‌فرض، و اعتبارسنجی همه از
 // یک منبع بیایند به‌جای سه تعریف موازی. اینجا فقط re-export می‌شوند تا
 // import های موجود (`from '../types'`) در بقیه‌ی کدبیس دست‌نخورده بمانند.
-export type { ReplaceRule, TelegramConnectionConfig, MediaType } from './schemas';
+import type { ReplaceRule, TelegramConnectionConfig, MediaType } from './schemas';
+export type { ReplaceRule, TelegramConnectionConfig, MediaType };
 
 export type ConnectionStatus = 'active' | 'inactive' | 'error';
 

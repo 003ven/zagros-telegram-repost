@@ -694,8 +694,21 @@ export class TelegramService {
       let realFilename: string | null = null;
       const disposition = res.headers.get('content-disposition');
       if (disposition) {
-        const match = disposition.match(/filename="?([^";]+)"?/i);
-        if (match && match[1]) realFilename = match[1].trim();
+        // اول فرمت استاندارد RFC 5987 برای اسم فایل‌های غیر-ASCII
+        // (فارسی، ایموجی، ...) چک می‌شود؛ اگر نبود، به filename= ساده
+        // (فقط ASCII) بازمی‌گردیم.
+        const starMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        if (starMatch && starMatch[1]) {
+          try {
+            realFilename = decodeURIComponent(starMatch[1]);
+          } catch {
+            realFilename = null;
+          }
+        }
+        if (!realFilename) {
+          const match = disposition.match(/filename="?([^";]+)"?/i);
+          if (match && match[1]) realFilename = match[1].trim();
+        }
       }
       const ext = contentType.includes('png')
         ? 'png'
@@ -898,7 +911,7 @@ export class TelegramService {
       const urlDescriptors = urls.map((u, i) => ({
         type: 'photo',
         media: u,
-        ...(i === 0 && caption ? { caption, parse_mode: parseMode } : {}),
+        ...(i === urls.length - 1 && caption ? { caption, parse_mode: parseMode } : {}),
       }));
       const res = await fetch(`${getTelegramApiBase()}/bot${botToken}/sendMediaGroup`, {
         method: 'POST',
@@ -934,7 +947,7 @@ export class TelegramService {
     const mediaDescriptors = validSources.map((_, i) => ({
       type: 'photo',
       media: `attach://file${i}`,
-      ...(i === 0 && caption ? { caption, parse_mode: parseMode } : {}),
+      ...(i === validSources.length - 1 && caption ? { caption, parse_mode: parseMode } : {}),
     }));
 
     const result = await TelegramService.streamMultipartUpload(
@@ -967,7 +980,7 @@ export class TelegramService {
     const mediaDescriptors = validSources.map((_, i) => ({
       type: 'document',
       media: `attach://file${i}`,
-      ...(i === 0 && caption ? { caption, parse_mode: parseMode } : {}),
+      ...(i === validSources.length - 1 && caption ? { caption, parse_mode: parseMode } : {}),
     }));
     const result = await TelegramService.streamMultipartUpload(
       botToken,

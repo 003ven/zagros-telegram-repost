@@ -27,6 +27,7 @@ import {
   AuthChangePasswordSchema,
   IncomingPushMessageSchema,
   ScheduledPostCreateSchema,
+  type ScheduledPostCreateInput,
 } from './src/schemas';
 import { logger } from './src/server/logger';
 
@@ -325,6 +326,44 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
     }
   });
 
+  // Edit source/target channel and bot token of an existing connection —
+  // بدون نیاز به حذف و ساخت دوباره‌ی پل. چون شماره‌ی پیام‌ها با کانال
+  // مبدأ جدید بی‌معنی می‌شود، lastMessageId ریست می‌شود.
+  app.put('/api/connections/:id/channels', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const conn = await Storage.getConnection(id);
+      if (!conn) {
+        return res.status(404).json({ success: false, error: 'اتصال یافت نشد' });
+      }
+      const { sourceChannel, targetChannel, botToken } = req.body || {};
+      if (typeof sourceChannel === 'string' && sourceChannel.trim()) {
+        conn.sourceChannel = TelegramService.cleanChannelName(sourceChannel.trim());
+      }
+      if (typeof targetChannel === 'string' && targetChannel.trim()) {
+        conn.targetChannel = targetChannel.trim();
+      }
+      if (typeof botToken === 'string' && botToken.trim()) {
+        conn.botToken = botToken.trim();
+      }
+      conn.lastMessageId = null;
+      conn.lastError = null;
+      conn.consecutiveErrors = 0;
+      conn.status = 'active';
+      conn.updatedAt = new Date().toISOString();
+      await Storage.saveConnection(conn);
+      await TelegramService.stopMonitoring(id);
+      await TelegramService.startMonitoring(id);
+      await Storage.addLog(
+        id,
+        'info',
+        `کانال‌ها/توکن این پل ویرایش شد: ${conn.sourceChannel} ➔ ${conn.targetChannel}`
+      );
+      return res.json({ success: true, connection: conn });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'خطا در ویرایش کانال‌های اتصال' });
+    }
+  });
   // Toggle connection status (Pause / Resume)
   app.put('/api/connections/:id/toggle', async (req, res) => {
     try {
@@ -515,7 +554,7 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
 
   app.post('/api/scheduled-posts', async (req, res) => {
     try {
-      const body = validateBody(ScheduledPostCreateSchema, req, res);
+      const body = validateBody<typeof ScheduledPostCreateSchema>(ScheduledPostCreateSchema, req, res);
       if (!body) return;
 
       const conn = await Storage.getConnection(body.connectionId);
@@ -526,7 +565,11 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
         return res.status(400).json({ success: false, error: 'زمان زمان‌بندی باید در آینده باشد' });
       }
 
-      const post = await Storage.createScheduledPost(body);
+      const post = await Storage.createScheduledPost({
+        connectionId: body.connectionId,
+        text: body.text,
+        scheduledAt: body.scheduledAt,
+      });
       await Storage.addLog(conn.id, 'info', `یک پست جدید در کتابخانه‌ی محتوا برای ${post.scheduledAt} زمان‌بندی شد`);
       return res.status(201).json({ success: true, post });
     } catch (err) {

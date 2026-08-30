@@ -38,6 +38,7 @@ import sys
 import time
 import uuid
 import mimetypes
+import urllib.parse
 from PIL import Image
 from aiohttp import web, ClientSession
 from telethon import TelegramClient, events
@@ -581,7 +582,16 @@ async def handle_media(request: web.Request) -> web.Response:
     real_filename = os.path.basename(info["path"])
     guessed_type, _ = mimetypes.guess_type(real_filename)
     resp = web.FileResponse(info["path"])
-    resp.headers["Content-Disposition"] = f'attachment; filename="{real_filename}"'
+    # هدر HTTP طبق استاندارد فقط ASCII را مستقیم قبول می‌کند — برای
+    # اسم فایل‌های فارسی/ایموجی/غیر-ASCII باید از فرمت RFC 5987
+    # (filename*=UTF-8''...) استفاده کرد؛ filename= ساده هم به‌عنوان
+    # fallback برای کلاینت‌های قدیمی با نسخه‌ی ASCII-سازی‌شده می‌ماند
+    # تا خودِ هدر بی‌اعتبار نشود.
+    ascii_fallback = real_filename.encode("ascii", "replace").decode("ascii").replace('"', "_")
+    encoded_name = urllib.parse.quote(real_filename, safe="")
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_name}'
+    )
     if guessed_type:
         resp.content_type = guessed_type
     return resp

@@ -66,6 +66,9 @@ export const TelegramConnectionConfigSchema = z.object({
   customButtons: z
     .array(z.object({ id: z.string(), text: z.string(), url: z.string(), newRow: z.boolean().default(true) }))
     .default(() => []),
+  // دسته‌بندی موضوعی پل (فوتبال، گیم، اخبار، VPN و ...) — برای
+  // گروه‌بندی و فیلتر در پنل. src/lib/categories.ts
+  category: z.string().default('سایر'),
   customHeader: z.string().default(''),
   customFooter: z.string().default(''),
   keywordsInclude: z.array(z.string()).default(() => []),

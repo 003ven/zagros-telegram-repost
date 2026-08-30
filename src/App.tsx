@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Header } from './components/Header';
 import { AddConnectionForm } from './components/AddConnectionForm';
 import { ConnectionCard } from './components/ConnectionCard';
+import { getAllCategories, getConnectionCategory } from './lib/categories';
 import { LogsModal } from './components/LogsModal';
 import { ChannelPreviewModal } from './components/ChannelPreviewModal';
 import { ConnectionRulesModal } from './components/ConnectionRulesModal';
@@ -106,6 +107,7 @@ export default function App() {
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isContentLibraryOpen, setIsContentLibraryOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'status' | 'lastActive' | 'messages' | 'createdAt'>('lastActive');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isBulkExecuting, setIsBulkExecuting] = useState(false);
 
@@ -709,6 +711,36 @@ export default function App() {
             </div>
           )}
 
+          {connections.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap pb-1">
+              <span className="text-[11px] font-bold text-white/40 shrink-0">دسته‌بندی:</span>
+              <button
+                onClick={() => setCategoryFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                  categoryFilter === 'all'
+                    ? 'bg-orange-500 text-white'
+                    : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/10'
+                }`}
+              >
+                همه ({connections.length})
+              </button>
+              {getAllCategories(connections)
+                .filter((cat) => connections.some((c) => getConnectionCategory(c) === cat))
+                .map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setCategoryFilter(cat)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                      categoryFilter === cat
+                        ? 'bg-orange-500 text-white'
+                        : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/10'
+                    }`}
+                  >
+                    {cat} ({connections.filter((c) => getConnectionCategory(c) === cat).length})
+                  </button>
+                ))}
+            </div>
+          )}
           {connections.length === 0 ? (
             <div className="py-12 text-center space-y-3">
               <div className="w-14 h-14 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center mx-auto">
@@ -719,28 +751,65 @@ export default function App() {
                 برای راه‌اندازی، دکمه «ایجاد پل جدید» (+) را بزنید و فیلدها را پر کنید.
               </p>
             </div>
-          ) : (
-            <div className="space-y-4">
-              {sortedConnections.map((conn) => (
-                <ConnectionCard
-                  key={conn.id}
-                  connection={conn}
-                  selected={selectedIds.includes(conn.id)}
-                  onToggleSelect={handleToggleSelect}
-                  onToggle={handleToggleConnection}
-                  onRestart={handleRestartConnection}
-                  onDelete={handleDeleteConnection}
-                  onViewLogs={(id) => {
-                    setIsGlobalLogs(false);
-                    setActiveLogsId(id);
-                  }}
-                  onPreviewChannel={(ch) => setActivePreviewChannel(ch)}
-                  onTriggerSync={handleTriggerSync}
-                  onOpenRules={(c) => setRulesModalConnection(c)}
-                />
-              ))}
-            </div>
-          )}
+          ) : (() => {
+            const filtered =
+              categoryFilter === 'all'
+                ? sortedConnections
+                : sortedConnections.filter((c) => getConnectionCategory(c) === categoryFilter);
+            if (filtered.length === 0) {
+              return (
+                <div className="py-8 text-center text-xs text-white/40">
+                  هیچ پلی در این دسته‌بندی نیست.
+                </div>
+              );
+            }
+            const renderCard = (conn: typeof filtered[number]) => (
+              <ConnectionCard
+                key={conn.id}
+                connection={conn}
+                selected={selectedIds.includes(conn.id)}
+                onToggleSelect={handleToggleSelect}
+                onToggle={handleToggleConnection}
+                onRestart={handleRestartConnection}
+                onDelete={handleDeleteConnection}
+                onViewLogs={(id) => {
+                  setIsGlobalLogs(false);
+                  setActiveLogsId(id);
+                }}
+                onPreviewChannel={(ch) => setActivePreviewChannel(ch)}
+                onTriggerSync={handleTriggerSync}
+                onOpenRules={(c) => setRulesModalConnection(c)}
+              />
+            );
+            if (categoryFilter !== 'all') {
+              return <div className="space-y-4">{filtered.map(renderCard)}</div>;
+            }
+            // گروه‌بندی زیر هم — هر دسته یک بخش جدا با عنوان
+            const groups: { category: string; items: typeof filtered }[] = [];
+            filtered.forEach((conn) => {
+              const cat = getConnectionCategory(conn);
+              let group = groups.find((g) => g.category === cat);
+              if (!group) {
+                group = { category: cat, items: [] };
+                groups.push(group);
+              }
+              group.items.push(conn);
+            });
+            return (
+              <div className="space-y-6">
+                {groups.map((group) => (
+                  <div key={group.category} className="space-y-3">
+                    <h3 className="text-xs font-bold text-white/50 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />
+                      {group.category}
+                      <span className="text-white/30 font-normal">({group.items.length})</span>
+                    </h3>
+                    <div className="space-y-4">{group.items.map(renderCard)}</div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </section>
 
         {/* Live Logs Section */}
