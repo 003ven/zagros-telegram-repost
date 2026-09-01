@@ -69,6 +69,11 @@ export const TelegramConnectionConfigSchema = z.object({
   // دسته‌بندی موضوعی پل (فوتبال، گیم، اخبار، VPN و ...) — برای
   // گروه‌بندی و فیلتر در پنل. src/lib/categories.ts
   category: z.string().default('سایر'),
+  // تأیید دیدن خطا — وقتی کاربر لاگ‌های یک پل خطادار را باز می‌کند،
+  // این مقدار برابر consecutiveErrors فعلی می‌شود؛ تا وقتی خطای
+  // جدیدتری رخ ندهد (consecutiveErrors از این عدد بیشتر نشود)، بج
+  // خطا به‌جای قرمزِ چشمک‌زن، به رنگ خنثی‌تر نمایش داده می‌شود.
+  errorAcknowledgedCount: z.number().nullable().optional(),
   customHeader: z.string().default(''),
   customFooter: z.string().default(''),
   keywordsInclude: z.array(z.string()).default(() => []),

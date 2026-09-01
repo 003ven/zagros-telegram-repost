@@ -364,6 +364,26 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
       return res.status(500).json({ success: false, error: 'خطا در ویرایش کانال‌های اتصال' });
     }
   });
+  // Acknowledge error — کاربر لاگ‌های یک پل خطادار را دیده است؛
+  // بج قرمزِ چشمک‌زن تا وقتی خطای جدیدتری رخ ندهد آرام می‌شود.
+  app.put('/api/connections/:id/acknowledge-error', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const conn = await Storage.getConnection(id);
+      if (!conn) {
+        return res.status(404).json({ success: false, error: 'اتصال یافت نشد' });
+      }
+      conn.config = {
+        ...TelegramService.getDefaultConfig(),
+        ...(conn.config || {}),
+        errorAcknowledgedCount: conn.consecutiveErrors ?? 0,
+      };
+      await Storage.saveConnection(conn);
+      return res.json({ success: true, connection: conn });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'خطا در ثبت تأیید خطا' });
+    }
+  });
   // Toggle connection status (Pause / Resume)
   app.put('/api/connections/:id/toggle', async (req, res) => {
     try {

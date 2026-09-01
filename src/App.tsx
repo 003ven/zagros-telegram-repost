@@ -775,6 +775,9 @@ export default function App() {
                 onViewLogs={(id) => {
                   setIsGlobalLogs(false);
                   setActiveLogsId(id);
+                  apiFetch(`/api/connections/${id}/acknowledge-error`, { method: 'PUT' })
+                    .then(() => fetchConnections())
+                    .catch(() => {});
                 }}
                 onPreviewChannel={(ch) => setActivePreviewChannel(ch)}
                 onTriggerSync={handleTriggerSync}

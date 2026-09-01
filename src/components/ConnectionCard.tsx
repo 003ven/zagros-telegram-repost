@@ -190,12 +190,26 @@ export const ConnectionCard: React.FC<ConnectionCardProps> = ({
 
   const getStatusBadge = () => {
     if (connection.status === 'error' || (connection.consecutiveErrors && connection.consecutiveErrors >= 1)) {
-      const count = connection.consecutiveErrors || 1;
+      const count = connection.consecutiveErrors ?? 0;
+      const displayCount = count > 0 ? count : 1;
+      // -1 یعنی هنوز هیچ‌وقت تأیید نشده؛ بعد از تأیید، این عدد برابر
+      // count در همان لحظه می‌شود (حتی اگر ۰ باشد) تا مقایسه‌ی
+      // count <= ackCount درست کار کند و صفر با «تأییدنشده» اشتباه نشود.
+      const ackCount = connection.config?.errorAcknowledgedCount ?? -1;
+      const isAcknowledged = ackCount >= 0 && count <= ackCount;
+      if (isAcknowledged) {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-amber-500/15 text-amber-400 border border-amber-500/30">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+            خطای دیده‌شده ({displayCount} بار)
+          </span>
+        );
+      }
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-red-500/20 text-red-400 border border-red-500/40 shadow-lg shadow-red-500/20 animate-pulse">
           <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping shrink-0"></span>
           <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-          خطای متوالی اتصال ({count} بار)
+          خطای متوالی اتصال ({displayCount} بار)
         </span>
       );
     }
@@ -419,38 +433,6 @@ export const ConnectionCard: React.FC<ConnectionCardProps> = ({
           </div>
         </div>
 
-        {/* Consecutive Error Notification & Suggestion Banner */}
-        {hasConsecutiveErrors && (
-          <div className="mx-4 my-3 p-3.5 bg-red-950/40 border border-red-500/40 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-red-200 text-xs shadow-lg shadow-red-900/20">
-            <div className="flex items-start gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0 mt-0.5">
-                <AlertTriangle className="w-4 h-4 animate-bounce" />
-              </div>
-              <div>
-                <div className="font-extrabold text-red-400 text-xs flex items-center gap-1.5">
-                  <span>بروز خطای متوالی در سنکرون‌سازی</span>
-                  {connection.consecutiveErrors ? (
-                    <span className="px-1.5 py-0.5 rounded bg-red-500/30 text-[10px]">
-                      {connection.consecutiveErrors} بار
-                    </span>
-                  ) : null}
-                </div>
-                <p className="text-[11px] text-red-200/80 mt-1 leading-relaxed">
-                  {connection.lastError ? `${connection.lastError}. ` : ''}
-                  پیشنهاد می‌شود لاگ‌های خطای این پل را بررسی کنید.
-                </p>
-              </div>
-            </div>
-
-            <button
-              onClick={() => onViewLogs(connection.id)}
-              className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-white font-extrabold text-xs shadow-md shadow-red-600/30 transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>بررسی لاگ‌های این پل ➔</span>
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Control Buttons */}
