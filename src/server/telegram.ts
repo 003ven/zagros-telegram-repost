@@ -597,7 +597,6 @@ export class TelegramService {
     const canPreserveFormatting =
       !(config.replaceRules && config.replaceRules.length > 0) &&
       !config.removeLinks &&
-      !(config.linkReplaceRules && config.linkReplaceRules.length > 0) &&
       !config.aiRewrite &&
       (!config.aiTranslate || config.aiTranslate === 'none');
 
@@ -606,6 +605,18 @@ export class TelegramService {
       let sanitized = TelegramService.sanitizeHtmlForTelegram(message.htmlText);
       if (config.removeMentions) {
         sanitized = TelegramService.stripMentionsPreservingFormat(sanitized);
+      }
+      if (config.linkReplaceRules && config.linkReplaceRules.length > 0) {
+        sanitized = sanitized.replace(/href="([^"]*)"/gi, (m, hrefUrl) => {
+          let newUrl = TelegramService.decodeHtmlEntities(hrefUrl);
+          for (const rule of config.linkReplaceRules) {
+            if (rule.search) {
+              const reg = new RegExp(rule.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+              newUrl = newUrl.replace(reg, rule.replace || '');
+            }
+          }
+          return `href="${newUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"`;
+        });
       }
       if (config.customHeader && config.customHeader.trim()) {
         sanitized = `${escapeHtml(config.customHeader.trim())}\n\n${sanitized}`;
@@ -1814,10 +1825,22 @@ export class TelegramService {
 
   public static async startAllActiveConnections(): Promise<void> {
     const all = await Storage.getAllConnections();
-    all.forEach((conn) => {
+    // قبلاً با forEach بدون await همه‌ی اتصال‌ها را همزمان استارت می‌کردیم؛
+    // این کار موقع بوت سرور یک موج بزرگ از کوئری‌های همزمان به دیتابیس
+    // می‌فرستاد و pool اتصال Prisma (پیش‌فرض کوچک) را پر می‌کرد و باعث
+    // خطای "Timed out fetching a new connection from the connection pool"
+    // می‌شد. حالا اتصال‌ها را متوالی (یکی‌یکی، با کمی فاصله) استارت
+    // می‌کنیم؛ چون فقط موقع بوت اجرا می‌شود، تأخیر چند صدم ثانیه‌ای بی‌اثر
+    // است ولی فشار روی pool را کاملاً از بین می‌برد.
+    for (const conn of all) {
       if (conn.status === 'active' || conn.status === 'error') {
-        TelegramService.startMonitoring(conn.id);
+        try {
+          await TelegramService.startMonitoring(conn.id);
+        } catch (e) {
+          logger.warn({ err: e, connId: conn.id }, 'شروع مانیتورینگ این اتصال هنگام بوت شکست خورد');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 150));
       }
-    });
+    }
   }
 }
