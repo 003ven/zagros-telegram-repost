@@ -772,6 +772,7 @@ async function startServer() {
   // اجرای واقعی سرور، نه برای createApp() که تست‌ها صدا می‌زنند.
   await TelegramService.startAllActiveConnections();
   startUptimeSampler();
+  startWatchReconciler();
   startScheduledPostRunner();
 
   const app = await createApp({ mountFrontend: true });
@@ -786,6 +787,21 @@ async function startServer() {
  * تغذیه‌کننده‌ی نمودار Uptime واقعی (GET /api/uptime-history،
  * src/components/UptimeChart.tsx). فقط در اجرای واقعی سرور فعال است.
  */
+/**
+ * فاز ۴: هر ۵ دقیقه تمام پل‌های فعال در حالت push را دوباره به یوزربات
+ * معرفی می‌کند (self-healing در برابر ری‌استارت مستقل یوزربات).
+ */
+function startWatchReconciler() {
+  const run = async () => {
+    try {
+      await TelegramService.reconcilePushWatchers();
+    } catch (err) {
+      logger.error({ err }, 'همگام\u200cسازی دوره\u200cای watch با یوزربات شکست خورد');
+    }
+  };
+  run();
+  setInterval(run, 5 * 60 * 1000);
+}
 function startUptimeSampler() {
   const sample = async () => {
     try {

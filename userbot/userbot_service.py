@@ -84,7 +84,7 @@ client = TelegramClient(
 # Node باید دوباره watch را برای پل‌های فعال صدا بزند — همان‌طور که
 # TelegramService.startAllActiveConnections در استارت Node این کار را
 # برای هر پل انجام می‌دهد) ---
-watch_refcount: dict[str, int] = {}          # '@channel' -> تعداد پل‌هایی که به آن نیاز دارند
+channel_watchers: dict[str, set[str]] = {}          # '@channel' -> {connection_id, ...}          # '@channel' -> تعداد پل‌هایی که به آن نیاز دارند
 media_tokens: dict[str, dict] = {}           # token -> {"path": ..., "expires_at": ...}
 
 # ⚠️ رفع باگ واقعی production (مرداد ۱۴۰۴/اوت ۲۰۲۶): آلبوم‌ها (چند
@@ -357,7 +357,7 @@ async def on_new_message(event):
     if not username:
         return
     channel_key = f"@{username}"
-    if watch_refcount.get(channel_key, 0) <= 0:
+    if not channel_watchers.get(channel_key):
         return
 
     msg = event.message
@@ -371,44 +371,38 @@ async def on_new_message(event):
         await push_single_message(channel_key, msg)
 
 
-async def ensure_watching(channel: str) -> dict:
-    """اگر این کانال قبلاً watch نشده، اکانت یوزربات را عضوش می‌کند
-    (لازم است — Telethon فقط برای چت‌هایی که عضو هستیم update زنده
-    می‌فرستد). ref-counted: چند پل می‌توانند هم‌زمان یک کانال مبدأ
-    مشترک را watch کنند؛ فقط وقتی شمارنده به صفر برسد واقعاً unwatch
-    می‌شویم (ولی از کانال خارج نمی‌شویم — عضویت مجانی و بی‌خطر است و
-    خروج/ورود مکرر ریسک محدودیت تلگرام دارد)."""
+async def ensure_watching(channel: str, connection_id: str) -> dict:
+    """idempotent بر اساس connection_id: صدا زدن دوباره برای همان پل هیچ
+    اثر تجمعی اشتباهی ندارد — این ویژگی پیش‌نیاز reconciliation دوره‌ای
+    سمت Node است (نگاه کن به reconcilePushWatchers در telegram.ts)."""
     channel = channel if channel.startswith("@") else f"@{channel}"
-    was_new = watch_refcount.get(channel, 0) == 0
-    watch_refcount[channel] = watch_refcount.get(channel, 0) + 1
-
+    watchers = channel_watchers.setdefault(channel, set())
+    was_new = len(watchers) == 0
+    watchers.add(connection_id)
     if was_new:
         try:
             await client(JoinChannelRequest(channel))
         except ChannelPrivateError:
-            watch_refcount[channel] -= 1
+            watchers.discard(connection_id)
+            if not watchers:
+                channel_watchers.pop(channel, None)
             return {"success": False, "error": "کانال خصوصی است یا این اکانت به آن دسترسی ندارد"}
         except UsernameNotOccupiedError:
-            watch_refcount[channel] -= 1
+            watchers.discard(connection_id)
+            if not watchers:
+                channel_watchers.pop(channel, None)
             return {"success": False, "error": "چنین کانالی وجود ندارد"}
         except Exception as e:
-            # ممکن است از قبل عضو باشیم (خطای بی‌ضرر) یا خطای واقعی —
-            # هر دو را لاگ می‌کنیم ولی watch را نگه می‌داریم چون اگر از
-            # قبل عضو بودیم، دریافت پیام‌های زنده بدون مشکل کار می‌کند.
             print(f"ℹ️ JoinChannelRequest برای {channel}: {e} (ادامه می‌دهیم)")
-
-    return {"success": True, "refcount": watch_refcount[channel]}
-
-
-async def ensure_unwatching(channel: str) -> dict:
+    return {"success": True, "refcount": len(watchers)}
+async def ensure_unwatching(channel: str, connection_id: str) -> dict:
     channel = channel if channel.startswith("@") else f"@{channel}"
-    if channel in watch_refcount:
-        watch_refcount[channel] = max(0, watch_refcount[channel] - 1)
-        if watch_refcount[channel] == 0:
-            del watch_refcount[channel]
+    watchers = channel_watchers.get(channel)
+    if watchers is not None:
+        watchers.discard(connection_id)
+        if not watchers:
+            channel_watchers.pop(channel, None)
     return {"success": True}
-
-
 async def send_text_chunks(relay_channel: str, text: str) -> list:
     """متن رو در صورت لزوم به تکه‌های زیر 4096 کاراکتر می‌شکنه و پشت سر هم
     می‌فرسته، بدون این‌که هیچ بخشی از متن گم بشه."""
@@ -538,7 +532,7 @@ async def handle_forward(request: web.Request) -> web.Response:
 
 
 async def handle_health(request: web.Request) -> web.Response:
-    return web.json_response({"ok": True, "push_engine_enabled": bool(NODE_WEBHOOK_URL), "watching": list(watch_refcount.keys())})
+    return web.json_response({"ok": True, "push_engine_enabled": bool(NODE_WEBHOOK_URL), "watching": list(channel_watchers.keys())})
 
 
 async def handle_watch(request: web.Request) -> web.Response:
@@ -549,13 +543,14 @@ async def handle_watch(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"success": False, "error": "invalid json"}, status=400)
     channel = body.get("channel")
+    connection_id = body.get("connectionId")
     if not channel:
         return web.json_response({"success": False, "error": "missing channel"}, status=400)
-    result = await ensure_watching(channel)
+    if not connection_id:
+        return web.json_response({"success": False, "error": "missing connectionId"}, status=400)
+    result = await ensure_watching(channel, connection_id)
     status = 200 if result.get("success") else 400
     return web.json_response(result, status=status)
-
-
 async def handle_unwatch(request: web.Request) -> web.Response:
     if request.headers.get("X-Userbot-Secret") != SHARED_SECRET:
         return web.json_response({"success": False, "error": "unauthorized"}, status=401)
@@ -564,12 +559,13 @@ async def handle_unwatch(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"success": False, "error": "invalid json"}, status=400)
     channel = body.get("channel")
+    connection_id = body.get("connectionId")
     if not channel:
         return web.json_response({"success": False, "error": "missing channel"}, status=400)
-    result = await ensure_unwatching(channel)
+    if not connection_id:
+        return web.json_response({"success": False, "error": "missing connectionId"}, status=400)
+    result = await ensure_unwatching(channel, connection_id)
     return web.json_response(result)
-
-
 async def handle_media(request: web.Request) -> web.Response:
     # این endpoint عمداً بدون چک X-Userbot-Secret است چون Node آن را با
     # یک GET ساده (بدون هدر سفارشی، مثل fetch مستقیم URL) صدا می‌زند —

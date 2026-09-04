@@ -1486,6 +1486,21 @@ export class TelegramService {
    * (و لاگ می‌کند) اگر یوزربات تنظیم نشده یا در دسترس نبود — این حالت
    * عادی و بی‌خطر است، فقط یعنی fallback به poll لازم است.
    */
+  /**
+   * فاز ۴ (watch reconciliation): هر چند دقیقه یک‌بار برای همه‌ی پل‌های
+   * فعال در حالت push، دوباره /watch را صدا می‌زند. چون ensure_watching
+   * سمت یوزربات حالا idempotent است، این تماس تکراری بی‌خطر است و خودش
+   * را با هر ری‌استارت مستقل یوزربات همگام می‌کند — بدون نیاز به رعایت
+   * دستی ترتیب ری‌استارت.
+   */
+  public static async reconcilePushWatchers(): Promise<void> {
+    for (const [connId, mode] of TelegramService.monitoringMode.entries()) {
+      if (mode !== 'push') continue;
+      const conn = await Storage.getConnection(connId);
+      if (!conn || conn.status === 'inactive') continue;
+      await TelegramService.tryStartPushMonitoring(conn);
+    }
+  }
   private static async tryStartPushMonitoring(conn: TelegramConnection): Promise<boolean> {
     const baseUrl = process.env.USERBOT_SERVICE_URL;
     const secret = process.env.USERBOT_SECRET;
@@ -1495,7 +1510,7 @@ export class TelegramService {
       const response = await fetch(`${baseUrl.replace(/\/$/, '')}/watch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Userbot-Secret': secret },
-        body: JSON.stringify({ channel: conn.sourceChannel }),
+        body: JSON.stringify({ channel: conn.sourceChannel, connectionId: conn.id }),
         signal: AbortSignal.timeout(10000),
       });
       const data = await response.json().catch(() => null);
@@ -1517,7 +1532,7 @@ export class TelegramService {
       await fetch(`${baseUrl.replace(/\/$/, '')}/unwatch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Userbot-Secret': secret },
-        body: JSON.stringify({ channel: conn.sourceChannel }),
+        body: JSON.stringify({ channel: conn.sourceChannel, connectionId: conn.id }),
         signal: AbortSignal.timeout(10000),
       });
     } catch (e) {
