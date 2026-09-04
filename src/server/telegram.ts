@@ -1,3 +1,5 @@
+import { splitForTelegram, wrapConfigLinks } from './textSplit';
+import { enqueueForTarget } from './targetQueue';
 import {
   TelegramConnection,
   TelegramConnectionConfig,
@@ -625,6 +627,9 @@ export class TelegramService {
         sanitized = `${sanitized}\n\n${escapeHtml(config.customFooter.trim())}`;
       }
       processedHtml = sanitized.trim();
+    }
+    if (processedHtml) {
+      processedHtml = wrapConfigLinks(processedHtml);
     }
     // 9. Inline Buttons — حذف کامل یا جایگزینی لینک دکمه‌ها
     let processedInlineKeyboard: { text: string; url: string }[][] | undefined = message.inlineKeyboard;
@@ -1565,6 +1570,9 @@ export class TelegramService {
       }
     }
 
+    const hasMedia = post.mediaType !== 'text' && !!(post.mediaUrls && post.mediaUrls.length > 0);
+    const split = splitForTelegram(processResult.processedText || '', processResult.processedHtml, hasMedia);
+
     const postToSend: TelegramMessage = {
       ...post,
       inlineKeyboard: processResult.processedInlineKeyboard,
@@ -1572,11 +1580,14 @@ export class TelegramService {
     const sendResult = await TelegramService.forwardMessageToTarget(
       conn,
       postToSend,
-      processResult.processedText,
-      processResult.processedHtml
+      split.main.text,
+      split.main.html
     );
 
     if (sendResult.success) {
+      if (split.overflow.length > 0) {
+        await TelegramService.sendOverflowChunks(conn.botToken.trim(), conn.targetChannel.trim(), split.overflow);
+      }
       conn.lastMessageId = Math.max(conn.lastMessageId || 0, post.id);
       conn.transferredCount += 1;
       conn.lastReceivedAt = new Date().toISOString();
@@ -1659,6 +1670,33 @@ export class TelegramService {
    * اگر خطای جدیدی از این جنس دیدید (که با retry حل نمی‌شود)، همین‌جا
    * اضافه‌اش کنید.
    */
+  private static async sendOverflowChunks(
+    botToken: string,
+    targetChannel: string,
+    overflow: { text: string; html?: string }[]
+  ): Promise<void> {
+    for (const chunk of overflow) {
+      try {
+        const res = await fetch(`${getTelegramApiBase()}/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: targetChannel,
+            text: chunk.html || chunk.text,
+            parse_mode: chunk.html ? 'HTML' : undefined,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        const data = await res.json();
+        if (!data || !data.ok) {
+          logger.warn({ targetChannel, data }, 'ارسال تکه‌ی اضافه‌ی متن طولانی رد شد');
+        }
+      } catch (e) {
+        logger.warn({ err: e, targetChannel }, 'ارسال تکه‌ی اضافه‌ی متن طولانی شکست خورد');
+      }
+    }
+  }
+
   private static isPermanentSendError(error?: string): boolean {
     if (!error) return false;
     const permanentPatterns = [
@@ -1750,7 +1788,7 @@ export class TelegramService {
       await Storage.addLog(connId, 'info', `${newPosts.length} پست جدید در کانال مبدأ یافت شد. در حال پردازش...`);
 
       for (const post of newPosts) {
-        const outcome = await TelegramService.processSinglePost(conn, post);
+        const outcome = await enqueueForTarget(conn.targetChannel, () => TelegramService.processSinglePost(conn, post));
         if (outcome === 'failed') break;
       }
     } catch (err) {
@@ -1819,12 +1857,34 @@ export class TelegramService {
       // Idempotency: اگر همین پیام قبلاً پردازش شده (مثلاً webhook دوباره
       // رسیده، یا هم‌زمان با یک sync دستی برخورد کرده)، دوباره ارسال نکن.
       if (conn.lastMessageId !== null && post.id <= conn.lastMessageId) continue;
-      await TelegramService.processSinglePost(conn, post);
+      await enqueueForTarget(conn.targetChannel, () => TelegramService.processSinglePost(conn, post));
     }
   }
 
+  private static async getAllConnectionsWithRetry(maxAttempts = 5, delayMs = 2000): Promise<TelegramConnection[]> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await Storage.getAllConnections();
+      } catch (e) {
+        if (attempt === maxAttempts) {
+          logger.error(
+            { err: e, attempt, maxAttempts },
+            'اتصال به دیتابیس بعد از چند تلاش هنگام بوت شکست خورد - سرور بدون مانیتورینگ خودکار بالا می‌آید'
+          );
+          return [];
+        }
+        logger.warn(
+          { err: e, attempt, maxAttempts },
+          `اتصال به دیتابیس هنگام بوت شکست خورد (تلاش ${attempt} از ${maxAttempts}) - ${delayMs / 1000} ثانیه صبر و تلاش دوباره`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    return [];
+  }
+
   public static async startAllActiveConnections(): Promise<void> {
-    const all = await Storage.getAllConnections();
+    const all = await TelegramService.getAllConnectionsWithRetry();
     // قبلاً با forEach بدون await همه‌ی اتصال‌ها را همزمان استارت می‌کردیم؛
     // این کار موقع بوت سرور یک موج بزرگ از کوئری‌های همزمان به دیتابیس
     // می‌فرستاد و pool اتصال Prisma (پیش‌فرض کوچک) را پر می‌کرد و باعث

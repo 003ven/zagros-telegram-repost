@@ -24,3 +24,6 @@ userbot/__pycache__/
 data/
 # فایل کانفیگ pm2 یوزربات — شامل API_HASH و USERBOT_SECRET خام است
 userbot/ecosystem.userbot.config.cjs
+
+# بکاپ‌های خودکار (ممکنه شامل نسخه‌ی قدیمی .env هم باشن)
+*.bak-*
