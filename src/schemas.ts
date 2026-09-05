@@ -95,6 +95,20 @@ export const TelegramConnectionConfigSchema = z.object({
   // با جزئیات پست به این URL فرستاده می‌شود (برای یکپارچگی با ابزارهای
   // دیگر کاربر — Zapier/n8n/اسکریپت شخصی و مانند آن).
   webhookUrl: z.string().url('آدرس webhook نامعتبر است').or(z.literal('')).default(''),
+  // فاز ۵ (ری‌اکشن‌ها): ری‌اکشن‌های مجاز این پل روی کانال مقصد. اگر خالی
+  // باشد، تنظیمات فعلی چت دست‌نخورده می‌ماند — این فیلد فقط وقتی صراحتاً
+  // پر شود اثر می‌گذارد.
+  allowedReactions: z.array(z.string()).default(() => []),
+  // فاز ۵: بذرپاشی محدود — بعد از هر ارسال موفق، یک ری‌اکشن از طرف خودِ
+  // بات (نه اکانت جعلی) روی پیام می‌گذارد تا پست خالی به نظر نرسد.
+  seedReaction: z
+    .object({
+      enabled: z.boolean().default(false),
+      emojiPool: z.array(z.string()).default(() => []),
+      selectionMode: z.enum(['fixed', 'random']).default('fixed'),
+      isBig: z.boolean().default(false),
+    })
+    .default(() => ({ enabled: false, emojiPool: [], selectionMode: 'fixed' as const, isBig: false })),
 });
 
 export const ConnectionCreateInputSchema = z.object({

@@ -751,12 +751,25 @@ export class TelegramService {
    * the well-established pattern for streaming uploads in Node and avoids
    * needing the whole file in memory at any point.
    */
+  /**
+   * فاز ۵ (ری‌اکشن‌ها): از پاسخ Bot API، message_id واقعی پیام ارسال‌شده را
+   * استخراج می‌کند. برای sendMediaGroup که آرایه‌ای از پیام‌ها برمی‌گرداند،
+   * اولین پیام گروه را برمی‌گرداند — طبق مستندات تلگرام، ری‌اکشن روی آلبوم
+   * همیشه روی اولین پیام غیرحذف‌شده‌ی گروه اعمال می‌شود.
+   */
+  private static extractMessageId(result: unknown): number | undefined {
+    if (Array.isArray(result)) {
+      const first = result[0] as { message_id?: number } | undefined;
+      return first?.message_id;
+    }
+    return (result as { message_id?: number } | undefined)?.message_id;
+  }
   private static streamMultipartUpload(
     botToken: string,
     method: string,
     textFields: Record<string, string>,
     fileParts: { fieldName: string; stream: Readable; filename: string; contentType: string }[]
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; messageId?: number }> {
     return new Promise((resolve) => {
       try {
         const form = new FormData();
@@ -781,7 +794,7 @@ export class TelegramService {
             res.on('end', () => {
               try {
                 const data = JSON.parse(raw);
-                if (data && data.ok) resolve({ success: true });
+                if (data && data.ok) resolve({ success: true, messageId: TelegramService.extractMessageId(data.result) });
                 else resolve({ success: false, error: data.description || 'ارسال به تلگرام ناموفق بود' });
               } catch {
                 resolve({ success: false, error: 'پاسخ نامعتبر از تلگرام دریافت شد' });
@@ -812,7 +825,7 @@ export class TelegramService {
     caption: string,
     parseMode?: 'HTML',
     replyMarkup?: { inline_keyboard: { text: string; url: string }[][] }
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; messageId?: number }> {
     // Step 1 — fast path: let Telegram fetch the URL itself.
     try {
       const res = await fetch(`${getTelegramApiBase()}/bot${botToken}/sendPhoto`, {
@@ -828,7 +841,7 @@ export class TelegramService {
         signal: AbortSignal.timeout(15000),
       });
       const data = await res.json();
-      if (data && data.ok) return { success: true };
+      if (data && data.ok) return { success: true, messageId: TelegramService.extractMessageId(data.result) };
       // fall through to the streaming fallback below
     } catch {
       // network hiccup — also fall through to the fallback
@@ -874,7 +887,7 @@ export class TelegramService {
     fallbackExt: string,
     parseMode?: 'HTML',
     replyMarkup?: { inline_keyboard: { text: string; url: string }[][] }
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; messageId?: number }> {
     try {
       const res = await fetch(`${getTelegramApiBase()}/bot${botToken}/${method}`, {
         method: 'POST',
@@ -889,7 +902,7 @@ export class TelegramService {
         signal: AbortSignal.timeout(20000),
       });
       const data = await res.json();
-      if (data && data.ok) return { success: true };
+      if (data && data.ok) return { success: true, messageId: TelegramService.extractMessageId(data.result) };
     } catch {
       // fall through to streaming fallback
     }
@@ -919,7 +932,7 @@ export class TelegramService {
     photoUrls: string[],
     caption: string,
     parseMode?: 'HTML'
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; messageId?: number }> {
     const urls = photoUrls.slice(0, 10); // Telegram allows max 10 items per album
 
     // Step 1 — fast path: let Telegram fetch each URL itself.
@@ -936,7 +949,7 @@ export class TelegramService {
         signal: AbortSignal.timeout(20000),
       });
       const data = await res.json();
-      if (data && data.ok) return { success: true };
+      if (data && data.ok) return { success: true, messageId: TelegramService.extractMessageId(data.result) };
       // fall through to the streaming fallback below
     } catch {
       // network hiccup — also fall through to the fallback
@@ -980,7 +993,7 @@ export class TelegramService {
     fileUrls: string[],
     caption: string,
     parseMode?: 'HTML'
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; messageId?: number }> {
     const urls = fileUrls.slice(0, 10);
     const opened = await Promise.all(urls.map((u) => TelegramService.openMediaStream(u)));
     const validSources = opened.filter((s): s is NonNullable<typeof s> => s !== null);
@@ -1049,7 +1062,7 @@ export class TelegramService {
     message: TelegramMessage,
     customText?: string,
     customHtml?: string
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; messageId?: number }> {
     const botToken = conn.botToken.trim();
     const sourceChannel = conn.sourceChannel.trim();
     const targetChannel = conn.targetChannel.trim();
@@ -1098,7 +1111,7 @@ export class TelegramService {
 
         const data = await response.json();
         if (data && data.ok) {
-          return { success: true };
+          return { success: true, messageId: TelegramService.extractMessageId(data.result) };
         }
       } catch (e) {
         logger.warn({ err: e }, 'copyMessage failed, falling back to sendMessage');
@@ -1224,6 +1237,7 @@ export class TelegramService {
       if (relayResult.success && relayResult.newMessageIds && relayResult.newMessageIds.length > 0) {
         const ids = relayResult.newMessageIds;
         let allOk = true;
+        let firstMessageId: number | undefined;
         for (let i = 0; i < ids.length; i++) {
           try {
             const copyRes = await fetch(`${getTelegramApiBase()}/bot${botToken}/copyMessage`, {
@@ -1242,11 +1256,12 @@ export class TelegramService {
             });
             const copyData = await copyRes.json();
             if (!copyData || !copyData.ok) allOk = false;
+            else if (i === 0) firstMessageId = copyData.result?.message_id;
           } catch {
             allOk = false;
           }
         }
-        if (allOk) return { success: true };
+        if (allOk) return { success: true, messageId: firstMessageId };
         await Storage.addLog(conn.id, 'warning', 'یوزربات فایل را دریافت کرد ولی تکمیل ارسال به مقصد ناموفق بود');
       } else {
         await Storage.addLog(
@@ -1275,8 +1290,8 @@ export class TelegramService {
 
       const data = await res.json();
       if (data && data.ok) {
-        return { success: true };
-      }
+          return { success: true, messageId: TelegramService.extractMessageId(data.result) };
+        }
 
       // If formatted HTML caused Telegram to reject the message (e.g. a
       // parsing edge case we didn't sanitize away), retry once as plain
@@ -1407,6 +1422,57 @@ export class TelegramService {
    * غیربلاک‌کننده با جزئیات پست می‌فرستد. خطای شبکه/timeout اینجا فقط
    * لاگ می‌شود، هرگز جریان اصلی ارسال به تلگرام را نمی‌شکند.
    */
+  /**
+   * فاز ۵: تنظیم ری‌اکشن‌های مجاز کانال مقصد (اگر تعریف شده) + بذرپاشی
+   * محدود (یک ری‌اکشن از طرف خودِ بات، نه اکانت جعلی) روی پیام تازه‌ارسال‌شده.
+   * کاملاً best-effort — هر خطا فقط لاگ می‌شود، جریان ارسال پست هرگز نمی‌شکند.
+   */
+  private static async applySeedReaction(conn: TelegramConnection, messageId?: number): Promise<void> {
+    const config = conn.config || TelegramService.getDefaultConfig();
+    if (!messageId || !config.seedReaction?.enabled) return;
+    const botToken = conn.botToken.trim();
+    const targetChannel = conn.targetChannel.trim();
+    if (config.allowedReactions && config.allowedReactions.length > 0) {
+      try {
+        await fetch(`${getTelegramApiBase()}/bot${botToken}/setChatAvailableReactions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: targetChannel,
+            available_reactions: config.allowedReactions.map((e) => ({ type: 'emoji', emoji: e })),
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+      } catch (e) {
+        logger.warn({ err: e, connId: conn.id }, 'تنظیم ری‌اکشن‌های مجاز کانال شکست خورد (بی‌خطر)');
+      }
+    }
+    const pool =
+      config.seedReaction.emojiPool && config.seedReaction.emojiPool.length > 0
+        ? config.seedReaction.emojiPool
+        : config.allowedReactions;
+    if (!pool || pool.length === 0) return;
+    const chosen =
+      config.seedReaction.selectionMode === 'random'
+        ? pool[Math.floor(Math.random() * pool.length)]
+        : pool[0];
+    if (!chosen) return;
+    try {
+      await fetch(`${getTelegramApiBase()}/bot${botToken}/setMessageReaction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: targetChannel,
+          message_id: messageId,
+          reaction: [{ type: 'emoji', emoji: chosen }],
+          is_big: !!config.seedReaction.isBig,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (e) {
+      logger.warn({ err: e, connId: conn.id }, 'بذرپاشی ری‌اکشن شکست خورد (بی‌خطر)');
+    }
+  }
   private static notifyOutboundWebhook(conn: TelegramConnection, event: Record<string, unknown>): void {
     const url = conn.config.webhookUrl;
     if (!url) return;
@@ -1624,6 +1690,7 @@ export class TelegramService {
         mediaType: post.mediaType,
         textPreview: (processResult.processedText || '').substring(0, 200),
       });
+      await TelegramService.applySeedReaction(conn, sendResult.messageId);
 
       await Storage.addLog(
         connId,
