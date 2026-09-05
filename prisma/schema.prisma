@@ -102,3 +102,15 @@ model ScheduledPost {
   @@index([status, scheduledAt])
   @@index([connectionId])
 }
+
+// فاز ۴: تنظیمات سیستم قابل مدیریت از پنل (کلید Gemini، کلید بازیابی
+// ادمین، سکرت مشترک با سرویس یوزربات و ...) — به‌جای این‌که این مقادیر
+// فقط با ویرایش دستی .env روی سرور قابل تغییر باشند. هر ردیف اینجا روی
+// مقدار متناظرش در process.env (خوانده‌شده از .env.local) اولویت
+// دارد؛ نبود یک کلید یعنی همان مقدار .env هنوز معتبر است (نگاه کن به
+// src/server/settings.ts).
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

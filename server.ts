@@ -17,6 +17,7 @@ import { Storage } from './src/server/storage';
 import { TelegramService } from './src/server/telegram';
 import { TelegramConnection } from './src/types';
 import { AuthService, requireAuth } from './src/server/auth';
+import { applyDbSettingsToProcessEnv, getAllSettingsForPanel, setSettings, SETTINGS_REGISTRY, syncUserbotEnvAndRestart } from './src/server/settings';
 import {
   ConnectionCreateInputSchema,
   TelegramConnectionConfigSchema,
@@ -192,6 +193,42 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
   // --- API ROUTES ---
 
   // Get all connections
+  app.get('/api/settings', requireAuth, async (req, res) => {
+    try {
+      const settings = await getAllSettingsForPanel();
+      return res.json({ success: true, settings });
+    } catch (err) {
+      logger.error({ err }, 'خطا در خواندن تنظیمات سیستم');
+      return res.status(500).json({ success: false, error: 'خطا در خواندن تنظیمات سیستم' });
+    }
+  });
+  app.put('/api/settings', requireAuth, async (req, res) => {
+    try {
+      const body = req.body?.values;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return res.status(400).json({ success: false, error: 'ورودی نامعتبر است' });
+      }
+      const clean: Record<string, string> = {};
+      for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+        if (typeof v === 'string' && SETTINGS_REGISTRY.some((s) => s.key === k)) {
+          clean[k] = v;
+        }
+      }
+      if (Object.keys(clean).length === 0) {
+        return res.status(400).json({ success: false, error: 'هیچ تنظیم معتبری برای ذخیره ارسال نشده است' });
+      }
+      const { userbotChanged } = await setSettings(clean);
+      let userbotRestart: { success: boolean; error?: string } | undefined;
+      if (userbotChanged) {
+        userbotRestart = await syncUserbotEnvAndRestart();
+      }
+      await Storage.addLog('system', 'info', 'تنظیمات سیستم توسط ادمین به‌روزرسانی شد', Object.keys(clean).join(', '));
+      return res.json({ success: true, userbotRestart });
+    } catch (err) {
+      logger.error({ err }, 'خطا در ذخیره تنظیمات سیستم');
+      return res.status(500).json({ success: false, error: 'خطا در ذخیره تنظیمات سیستم' });
+    }
+  });
   app.get('/api/connections', async (req, res) => {
     try {
       const connections = await Storage.getAllConnections();
@@ -613,12 +650,18 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
   app.get('/api/backup', async (req, res) => {
     try {
       const connections = await Storage.getAllConnections();
+      const settingsData = await getAllSettingsForPanel();
+      const settings: Record<string, string> = {};
+      for (const s of settingsData) {
+        if (s.value) settings[s.key] = s.value;
+      }
       const backupData = {
         app: 'Zagros Repost',
-        version: '1.0.0',
+        version: '1.1.0',
         exportedAt: new Date().toISOString(),
         totalConnections: connections.length,
         connections,
+        settings,
       };
 
       res.setHeader('Content-Type', 'application/json');
@@ -632,7 +675,7 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
   // Restore backup JSON
   app.post('/api/restore', async (req, res) => {
     try {
-      const { connections, mode = 'merge' } = req.body;
+      const { connections, mode = 'merge', settings: restoreSettings } = req.body;
 
       if (!Array.isArray(connections)) {
         return res.status(400).json({
@@ -681,12 +724,35 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
         restoredCount++;
       }
 
-      await Storage.addLog('system', 'info', `بازیابی پشتیبان با موفقیت انجام شد (${restoredCount} پل بازیابی شد)`);
+      let settingsRestoredCount = 0;
+      let userbotRestart: { success: boolean; error?: string } | undefined;
+      if (restoreSettings && typeof restoreSettings === 'object' && !Array.isArray(restoreSettings)) {
+        const cleanSettings: Record<string, string> = {};
+        for (const [k, v] of Object.entries(restoreSettings as Record<string, unknown>)) {
+          if (typeof v === 'string' && SETTINGS_REGISTRY.some((s) => s.key === k)) {
+            cleanSettings[k] = v;
+          }
+        }
+        settingsRestoredCount = Object.keys(cleanSettings).length;
+        if (settingsRestoredCount > 0) {
+          const { userbotChanged } = await setSettings(cleanSettings);
+          if (userbotChanged) {
+            userbotRestart = await syncUserbotEnvAndRestart();
+          }
+        }
+      }
+      await Storage.addLog(
+        'system',
+        'info',
+        `بازیابی پشتیبان با موفقیت انجام شد (${restoredCount} پل، ${settingsRestoredCount} تنظیم سیستم بازیابی شد)`
+      );
 
       return res.json({
         success: true,
         restoredCount,
-        message: `تعداد ${restoredCount} پل با موفقیت بازیابی و فعال گردید.`,
+        settingsRestoredCount,
+        userbotRestart,
+        message: `تعداد ${restoredCount} پل${settingsRestoredCount > 0 ? ` و ${settingsRestoredCount} تنظیم سیستم` : ''} با موفقیت بازیابی و فعال گردید.`,
       });
     } catch (err) {
       logger.error({ err }, 'Error restoring backup');
@@ -768,6 +834,10 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
 async function startServer() {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
+  // اگر تنظیماتی از پنل («تنظیمات سیستم») قبلاً ذخیره شده، همین اول
+  // روی process.env بنشان — قبل از هر چیزی که ممکن است این مقادیر را
+  // بخواند (مانیتورینگ پل‌ها، Gemini و غیره).
+  await applyDbSettingsToProcessEnv();
   // Initialize storage & start background monitoring tasks — فقط برای
   // اجرای واقعی سرور، نه برای createApp() که تست‌ها صدا می‌زنند.
   await TelegramService.startAllActiveConnections();

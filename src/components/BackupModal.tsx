@@ -34,6 +34,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   const [parsedBackup, setParsedBackup] = useState<any | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [restoreMode, setRestoreMode] = useState<'merge' | 'overwrite'>('merge');
+  const [restoreSettingsToggle, setRestoreSettingsToggle] = useState(true);
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreSuccessMsg, setRestoreSuccessMsg] = useState<string | null>(null);
 
@@ -42,14 +43,27 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   if (!isOpen) return null;
 
   // Handle Export Download
-  const handleExport = () => {
+  const handleExport = async () => {
     try {
+      let settings: Record<string, string> = {};
+      try {
+        const settingsRes = await apiFetch('/api/settings');
+        const settingsData = await settingsRes.json();
+        if (settingsData.success) {
+          for (const s of settingsData.settings as { key: string; value: string }[]) {
+            if (s.value) settings[s.key] = s.value;
+          }
+        }
+      } catch {
+        // اگر خواندن تنظیمات شکست خورد، بازهم پشتیبان پل‌ها بدون آن‌ها گرفته شود
+      }
       const backupData = {
         app: 'Zagros Repost',
         version: '1.0.0',
         exportedAt: new Date().toISOString(),
         totalConnections: connections.length,
         connections,
+        settings,
       };
 
       const jsonString = JSON.stringify(backupData, null, 2);
@@ -101,7 +115,6 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   // Execute Restore Request
   const handleRestore = async () => {
     if (!parsedBackup || !Array.isArray(parsedBackup.connections)) return;
-
     setIsRestoring(true);
     setParseError(null);
     setRestoreSuccessMsg(null);
@@ -113,13 +126,22 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         body: JSON.stringify({
           connections: parsedBackup.connections,
           mode: restoreMode,
+          ...(restoreSettingsToggle && parsedBackup.settings && typeof parsedBackup.settings === 'object'
+            ? { settings: parsedBackup.settings }
+            : {}),
         }),
       });
 
       const data = await res.json();
 
       if (data.success) {
-        setRestoreSuccessMsg(data.message || 'پشتیبان با موفقیت بازیابی شد.');
+        let successMsg = data.message || 'پشتیبان با موفقیت بازیابی شد.';
+        if (data.userbotRestart) {
+          successMsg += data.userbotRestart.success
+            ? ' سرویس یوزربات با مقادیر جدید ری‌استارت شد.'
+            : ` هشدار: ری‌استارت خودکار سرویس یوزربات شکست خورد (${data.userbotRestart.error || 'نامشخص'}).`;
+        }
+        setRestoreSuccessMsg(successMsg);
         onRestoreSuccess();
         setTimeout(() => {
           setSelectedFile(null);
@@ -343,6 +365,35 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {parsedBackup.settings && Object.keys(parsedBackup.settings).length > 0 && (
+                    <div
+                      onClick={() => setRestoreSettingsToggle(!restoreSettingsToggle)}
+                      className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-2 ${
+                        restoreSettingsToggle
+                          ? 'bg-blue-500/10 border-blue-500/40 text-white'
+                          : 'bg-[#0a0a0a] border-white/10 text-white/50'
+                      }`}
+                    >
+                      <div>
+                        <div className="text-xs font-bold">بازیابی تنظیمات سیستم هم انجام شود؟</div>
+                        <div className="text-[10px] text-white/50 mt-0.5">
+                          {Object.keys(parsedBackup.settings).length} تنظیم (شامل کلیدهای حساس) در این فایل موجود است — ممکن است سرویس یوزربات را ری‌استارت کند.
+                        </div>
+                      </div>
+                      <div
+                        className={`w-10 h-6 rounded-full shrink-0 relative transition-colors ${
+                          restoreSettingsToggle ? 'bg-blue-500' : 'bg-white/15'
+                        }`}
+                      >
+                        <div
+                          className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${
+                            restoreSettingsToggle ? 'right-0.5' : 'right-4'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   {/* Restorable Connections list */}
                   <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 pt-2">

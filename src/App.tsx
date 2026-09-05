@@ -11,6 +11,7 @@ import { UptimeChart } from './components/UptimeChart';
 import { EditFooterModal, FooterLinksConfig } from './components/EditFooterModal';
 import { BackupModal } from './components/BackupModal';
 import { ContentLibraryModal } from './components/ContentLibraryModal';
+import { SystemSettingsModal } from './components/SystemSettingsModal';
 import { TelegramConnection, ConnectionCreateInput, TelegramConnectionConfig, LogEntry } from './types';
 import { apiFetch, clearAuthToken, AUTH_EXPIRED_EVENT } from './lib/api';
 import {
@@ -106,6 +107,7 @@ export default function App() {
   const [rulesModalConnection, setRulesModalConnection] = useState<TelegramConnection | null>(null);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isContentLibraryOpen, setIsContentLibraryOpen] = useState(false);
+  const [isSystemSettingsOpen, setIsSystemSettingsOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'status' | 'lastActive' | 'messages' | 'createdAt'>('lastActive');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -422,6 +424,7 @@ export default function App() {
         onToggleTheme={handleToggleTheme}
         onOpenBackupModal={() => setIsBackupModalOpen(true)}
         onOpenContentLibrary={() => setIsContentLibraryOpen(true)}
+        onOpenSystemSettings={() => setIsSystemSettingsOpen(true)}
         onLogout={handleLogout}
       />
 
@@ -889,6 +892,11 @@ export default function App() {
         isOpen={isContentLibraryOpen}
         onClose={() => setIsContentLibraryOpen(false)}
         connections={connections}
+      />
+      {/* System Settings Modal — کلیدهای API و تنظیمات یوزربات از پنل */}
+      <SystemSettingsModal
+        isOpen={isSystemSettingsOpen}
+        onClose={() => setIsSystemSettingsOpen(false)}
       />
 
       {/* Logs Drawer/Modal */}

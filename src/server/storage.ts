@@ -16,7 +16,7 @@ import { logger } from './logger';
  * تابع جدیدی اضافه می‌کنی که Storage را صدا می‌زند، حتماً async باشد.
  */
 
-const prisma = new PrismaClient();
+export const prisma = new PrismaClient();
 
 function connectionFromRow(row: {
   id: string;

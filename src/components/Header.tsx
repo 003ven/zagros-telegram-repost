@@ -1,5 +1,5 @@
 import React from 'react';
-import { Send, RefreshCw, Plus, Radio, LogOut, Terminal, Sun, Moon, Database, CalendarClock } from 'lucide-react';
+import { Send, RefreshCw, Plus, Radio, LogOut, Terminal, Sun, Moon, Database, CalendarClock, Settings } from 'lucide-react';
 
 interface HeaderProps {
   activeCount: number;
@@ -9,6 +9,7 @@ interface HeaderProps {
   onOpenGlobalLogs?: () => void;
   onOpenBackupModal?: () => void;
   onOpenContentLibrary?: () => void;
+  onOpenSystemSettings?: () => void;
   showAddForm: boolean;
   onToggleAddForm: () => void;
   theme: 'dark' | 'light';
@@ -24,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenGlobalLogs,
   onOpenBackupModal,
   onOpenContentLibrary,
+  onOpenSystemSettings,
   showAddForm,
   onToggleAddForm,
   theme,
@@ -89,6 +91,17 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
+          {/* System Settings — کلیدهای API و تنظیمات یوزربات */}
+          {onOpenSystemSettings && (
+            <button
+              onClick={onOpenSystemSettings}
+              className="p-2.5 rounded-xl bg-slate-500/10 hover:bg-slate-500/20 text-slate-300 border border-slate-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+              title="تنظیمات سیستم (کلیدهای API و یوزربات)"
+            >
+              <Settings className="w-4 h-4" />
+              <span className="text-xs font-bold hidden lg:inline">تنظیمات سیستم</span>
+            </button>
+          )}
           {/* Quick Logs */}
           {onOpenGlobalLogs && (
             <button
