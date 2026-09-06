@@ -172,6 +172,13 @@ export const ConnectionRulesModal: React.FC<Props> = ({
   const [newCategoryName, setNewCategoryName] = useState('');
   const [skipDuplicateContent, setSkipDuplicateContent] = useState(currentConfig.skipDuplicateContent || false);
   const [webhookUrl, setWebhookUrl] = useState(currentConfig.webhookUrl || '');
+  const [allowedReactionsInput, setAllowedReactionsInput] = useState(
+    (currentConfig.allowedReactions || []).join(', ')
+  );
+  const [seedReactionEnabled, setSeedReactionEnabled] = useState(currentConfig.seedReaction?.enabled || false);
+  const [seedReactionRandom, setSeedReactionRandom] = useState(
+    currentConfig.seedReaction?.selectionMode === 'random'
+  );
   const [customHeader, setCustomHeader] = useState(currentConfig.customHeader || '');
   const [contentClassifierEnabled, setContentClassifierEnabled] = useState(
     currentConfig.contentClassifier?.enabled || false
@@ -506,6 +513,13 @@ export const ConnectionRulesModal: React.FC<Props> = ({
       category,
       skipDuplicateContent,
       webhookUrl,
+      allowedReactions: allowedReactionsInput.split(',').map((r) => r.trim()).filter(Boolean),
+      seedReaction: {
+        enabled: seedReactionEnabled,
+        emojiPool: [],
+        selectionMode: (seedReactionRandom ? 'random' : 'fixed') as 'random' | 'fixed',
+        isBig: false,
+      },
       customHeader,
       customFooter,
       keywordsInclude,
@@ -1087,6 +1101,48 @@ ${
                   </div>
                 </div>
 
+                {/* Seed Reaction — فاز ۵ */}
+                <div
+                  onClick={() => setSeedReactionEnabled(!seedReactionEnabled)}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all flex items-start gap-3 ${
+                    seedReactionEnabled
+                      ? 'bg-orange-500/10 border-orange-500/40 text-white'
+                      : 'bg-[#18181b] border-white/10 text-white/60 hover:border-white/20'
+                  }`}
+                >
+                  <div className={`p-2 rounded-lg ${seedReactionEnabled ? 'bg-orange-500 text-white' : 'bg-white/10'}`}>
+                    <span className="text-base leading-none">👍</span>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-white mb-1">بذرپاشی ری‌اکشن</h4>
+                    <p className="text-[11px] text-white/50">
+                      بعد از هر ارسال موفق، یک ری‌اکشن (از لیست زیر) از طرف خودِ ربات روی پست گذاشته می‌شود تا خالی به نظر نرسد.
+                    </p>
+                  </div>
+                </div>
+                {seedReactionEnabled && (
+                  <div className="p-4 rounded-xl border bg-[#18181b] border-white/10 space-y-3">
+                    <div>
+                      <h4 className="text-xs font-bold text-white mb-2">ری‌اکشن‌های مجاز (با کاما جدا کنید)</h4>
+                      <input
+                        type="text"
+                        value={allowedReactionsInput}
+                        onChange={(e) => setAllowedReactionsInput(e.target.value)}
+                        placeholder="👍, 🔥, ❤️"
+                        dir="ltr"
+                        className="w-full px-3 py-2 bg-[#0a0a0a] border border-white/15 rounded-xl text-white text-xs font-mono-code text-left"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={seedReactionRandom}
+                        onChange={(e) => setSeedReactionRandom(e.target.checked)}
+                      />
+                      انتخاب تصادفی از بین ری‌اکشن‌های بالا (در غیر این صورت همیشه اولی)
+                    </label>
+                  </div>
+                )}
                 {/* Outbound Webhook — فاز ۳ب */}
                 <div className="p-4 rounded-xl border bg-[#18181b] border-white/10">
                   <div className="flex items-center gap-2 mb-2">
