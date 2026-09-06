@@ -1088,6 +1088,7 @@ export class TelegramService {
       !!config.customHeader ||
       config.removeLinks ||
       config.removeMentions ||
+      (config.linkReplaceRules && config.linkReplaceRules.length > 0) ||
       config.aiRewrite ||
       (config.aiTranslate && config.aiTranslate !== 'none');
 
