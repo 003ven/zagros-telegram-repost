@@ -1,3 +1,4 @@
+import { classifyAndFormat } from './contentClassifier';
 import { splitForTelegram, wrapConfigLinks } from './textSplit';
 import { enqueueForTarget } from './targetQueue';
 import {
@@ -631,6 +632,22 @@ export class TelegramService {
     if (processedHtml) {
       processedHtml = wrapConfigLinks(processedHtml);
     }
+    // اگه تشخیص محتوا برای این پل فعاله، خروجیش (بازسازی فعال، نه فقط
+    // حفظ فرمت اصلی) جایگزین هرچی بالا محاسبه شد می‌شه.
+    if (config.contentClassifier?.enabled) {
+      const escapeHtmlForHeader = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      let classified = classifyAndFormat(text, {
+        alwaysAdd: config.contentClassifier.hashtagAlwaysAdd,
+        keywordMap: config.contentClassifier.hashtagKeywordMap,
+      });
+      if (config.customHeader && config.customHeader.trim()) {
+        classified = `${escapeHtmlForHeader(config.customHeader.trim())}\n\n${classified}`;
+      }
+      if (config.customFooter && config.customFooter.trim()) {
+        classified = `${classified}\n\n${escapeHtmlForHeader(config.customFooter.trim())}`;
+      }
+      processedHtml = classified;
+    }
     // 9. Inline Buttons — حذف کامل یا جایگزینی لینک دکمه‌ها
     let processedInlineKeyboard: { text: string; url: string }[][] | undefined = message.inlineKeyboard;
     if (config.removeInlineButtons) {
@@ -1090,7 +1107,8 @@ export class TelegramService {
       config.removeMentions ||
       (config.linkReplaceRules && config.linkReplaceRules.length > 0) ||
       config.aiRewrite ||
-      (config.aiTranslate && config.aiTranslate !== 'none');
+      (config.aiTranslate && config.aiTranslate !== 'none') ||
+      !!config.contentClassifier?.enabled;
 
     if (!hasModifications && message.mediaType !== 'media_group' && message.mediaType !== 'document_group') {
       // Try copyMessage (cheapest path — Telegram handles the media transfer

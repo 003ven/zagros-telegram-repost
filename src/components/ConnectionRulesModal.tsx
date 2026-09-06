@@ -1,3 +1,4 @@
+import { Tags } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { TelegramConnection, ReplaceRule, TelegramConnectionConfig, TelegramMessage } from '../types';
 import { getDefaultConnectionConfig } from '../lib/defaultConnectionConfig';
@@ -115,7 +116,7 @@ export const ConnectionRulesModal: React.FC<Props> = ({
   const currentConfig: TelegramConnectionConfig =
     connection?.config || initialConfig || getDefaultConnectionConfig();
 
-  const [activeTab, setActiveTab] = useState<'replace' | 'clean' | 'filter' | 'schedule' | 'ai' | 'test'>('replace');
+  const [activeTab, setActiveTab] = useState<'replace' | 'clean' | 'filter' | 'schedule' | 'ai' | 'classifier' | 'test'>('replace');
   
   // Local state for rules
   const [replaceRules, setReplaceRules] = useState<ReplaceRule[]>(currentConfig.replaceRules || []);
@@ -172,6 +173,17 @@ export const ConnectionRulesModal: React.FC<Props> = ({
   const [skipDuplicateContent, setSkipDuplicateContent] = useState(currentConfig.skipDuplicateContent || false);
   const [webhookUrl, setWebhookUrl] = useState(currentConfig.webhookUrl || '');
   const [customHeader, setCustomHeader] = useState(currentConfig.customHeader || '');
+  const [contentClassifierEnabled, setContentClassifierEnabled] = useState(
+    currentConfig.contentClassifier?.enabled || false
+  );
+  const [hashtagAlwaysAddInput, setHashtagAlwaysAddInput] = useState(
+    (currentConfig.contentClassifier?.hashtagAlwaysAdd || []).join(', ')
+  );
+  const [hashtagKeywordMapInput, setHashtagKeywordMapInput] = useState(
+    (currentConfig.contentClassifier?.hashtagKeywordMap || [])
+      .map((r) => `${r.keyword}=${r.hashtag}`)
+      .join(', ')
+  );
   const [customFooter, setCustomFooter] = useState(currentConfig.customFooter || '');
 
   // Filter state
@@ -391,6 +403,15 @@ export const ConnectionRulesModal: React.FC<Props> = ({
     if (cfg.activeDays) setActiveDays(cfg.activeDays);
     if (cfg.aiRewrite !== undefined) setAiRewrite(cfg.aiRewrite);
     if (cfg.aiTranslate) setAiTranslate(cfg.aiTranslate);
+    if (cfg.contentClassifier?.enabled !== undefined) setContentClassifierEnabled(cfg.contentClassifier.enabled);
+    if (cfg.contentClassifier?.hashtagAlwaysAdd) {
+      setHashtagAlwaysAddInput(cfg.contentClassifier.hashtagAlwaysAdd.join(', '));
+    }
+    if (cfg.contentClassifier?.hashtagKeywordMap) {
+      setHashtagKeywordMapInput(
+        cfg.contentClassifier.hashtagKeywordMap.map((r) => `${r.keyword}=${r.hashtag}`).join(', ')
+      );
+    }
 
     setPresetNotification(`تنظیمات پریست "${preset.name}" با موفقیت جایگذاری شد.`);
     setTimeout(() => setPresetNotification(null), 4000);
@@ -497,6 +518,22 @@ export const ConnectionRulesModal: React.FC<Props> = ({
       activeDays,
       aiRewrite,
       aiTranslate,
+      contentClassifier: {
+        enabled: contentClassifierEnabled,
+        hashtagAlwaysAdd: hashtagAlwaysAddInput
+          .split(',')
+          .map((h) => h.trim())
+          .filter(Boolean),
+        hashtagKeywordMap: hashtagKeywordMapInput
+          .split(',')
+          .map((pair) => pair.trim())
+          .filter(Boolean)
+          .map((pair) => {
+            const [keyword, hashtag] = pair.split('=').map((s) => s.trim());
+            return { keyword: keyword || '', hashtag: hashtag || keyword || '' };
+          })
+          .filter((r) => r.keyword && r.hashtag),
+      },
     };
 
     if (mode === 'create') {
@@ -847,6 +884,18 @@ export const ConnectionRulesModal: React.FC<Props> = ({
           >
             <Sparkles className="w-4 h-4 text-orange-400" />
             هوش مصنوعی (Gemini AI)
+          </button>
+          <button
+            onClick={() => setActiveTab('classifier')}
+            className={`flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-all whitespace-nowrap
+${
+              activeTab === 'classifier'
+                ? 'border-orange-500 text-orange-400 bg-orange-500/5'
+                : 'border-transparent text-white/60 hover:text-white'
+            }`}
+          >
+            <Tags className="w-4 h-4 text-orange-400" />
+            تشخیص محتوا و هشتگ
           </button>
 
           {mode !== 'create' && (
@@ -1647,6 +1696,65 @@ export const ConnectionRulesModal: React.FC<Props> = ({
                   <option value="en">ترجمه به انگلیسی (English)</option>
                   <option value="ar">ترجمه به عربی (Arabic)</option>
                 </select>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'classifier' && (
+            <div className="space-y-5">
+              <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 text-xs text-orange-300 flex items-start gap-3">
+                <Tags className="w-5 h-5 shrink-0 text-orange-400" />
+                <div>
+                  <h4 className="font-bold text-white mb-1">تشخیص هوشمند محتوا و فرمت‌بندی حرفه‌ای</h4>
+                  لینک‌های کانفیگ/پروکسی به‌صورت خودکار در قالب کد (قابل کپی با یک تپ) نمایش داده می‌شوند، متن‌های طولانی و تبلیغاتی داخل قاب نقل‌قول جدا می‌شوند، و هشتگ‌های مرتبط با موضوع این پل به پست اضافه می‌شوند.
+                </div>
+              </div>
+              <div
+                onClick={() => setContentClassifierEnabled(!contentClassifierEnabled)}
+                className={`p-4 rounded-xl border cursor-pointer transition-all flex items-start gap-3 ${
+                  contentClassifierEnabled
+                    ? 'bg-orange-500/15 border-orange-500 text-white'
+                    : 'bg-[#18181b] border-white/10 text-white/60 hover:border-white/20'
+                }`}
+              >
+                <div className={`p-2 rounded-lg ${contentClassifierEnabled ? 'bg-orange-500 text-white' : 'bg-white/10'}`}>
+                  <Tags className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white mb-1">فعال‌سازی تشخیص محتوا و قالب‌بندی</h4>
+                  <p className="text-[11px] text-white/50">
+                    توجه: با فعال‌شدن این گزینه، حتی پست‌های بدون تغییر دیگر هم دیگر از مسیر کپی مستقیم رد نمی‌شوند و از این قالب‌بندی عبور می‌کنند.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-white flex items-center gap-2">
+                  <Tags className="w-4 h-4 text-orange-400" />
+                  هشتگ‌هایی که همیشه اضافه شوند (با ویرگول جدا کنید):
+                </label>
+                <input
+                  type="text"
+                  value={hashtagAlwaysAddInput}
+                  onChange={(e) => setHashtagAlwaysAddInput(e.target.value)}
+                  placeholder="مثال: Zagros_VPN, VPN"
+                  className="w-full p-3 text-xs bg-[#0a0a0a] border border-white/15 rounded-xl text-white focus:outline-none focus:border-orange-500"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-white flex items-center gap-2">
+                  <Tags className="w-4 h-4 text-orange-400" />
+                  تبدیل کلمه به هشتگ (فرمت: کلمه=هشتگ، با ویرگول جدا کنید):
+                </label>
+                <input
+                  type="text"
+                  value={hashtagKeywordMapInput}
+                  onChange={(e) => setHashtagKeywordMapInput(e.target.value)}
+                  placeholder="مثال: پروکسی=Proxy, کانفیگ=Config"
+                  className="w-full p-3 text-xs bg-[#0a0a0a] border border-white/15 rounded-xl text-white focus:outline-none focus:border-orange-500"
+                />
+                <p className="text-[11px] text-white/40">
+                  اگر هرکدام از این کلمات در متن پست پیدا شود، هشتگ متناظرش (اگر از قبل نبود) به انتهای پست اضافه می‌شود.
+                </p>
               </div>
             </div>
           )}

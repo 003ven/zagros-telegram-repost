@@ -109,6 +109,25 @@ export const TelegramConnectionConfigSchema = z.object({
       isBig: z.boolean().default(false),
     })
     .default(() => ({ enabled: false, emojiPool: [], selectionMode: 'fixed' as const, isBig: false })),
+  // تشخیص خودکار نوع محتوا (کانفیگ/پروکسی، هشتگ، لینک) و قالب‌بندی
+  // حرفه‌ای با HTML. وقتی enabled=true باشد، حتی اگر پل هیچ تغییر دیگری
+  // نداشته باشد، پست دیگر از مسیر سریع copyMessage رد نمی‌شود - چون آن
+  // مسیر پیام مبدأ را دست‌نخورده کپی می‌کند و این کلاسیفایر اصلاً فرصت
+  // اجرا پیدا نمی‌کند.
+  contentClassifier: z
+    .object({
+      enabled: z.boolean().default(false),
+      // هشتگ‌هایی که همیشه به پست این پل اضافه می‌شوند (مثلاً برند
+      // خودِ کانال)، صرف‌نظر از محتوای پست.
+      hashtagAlwaysAdd: z.array(z.string()).default(() => []),
+      // اگر هرکدام از این کلمات کلیدی در متن پست پیدا شود، هشتگ متناظرش
+      // اضافه می‌شود (اگر از قبل نبود). تشخیص کلمه با پشتیبانی کامل از
+      // فارسی/عربی انجام می‌شود، نه فقط انگلیسی.
+      hashtagKeywordMap: z
+        .array(z.object({ keyword: z.string(), hashtag: z.string() }))
+        .default(() => []),
+    })
+    .default(() => ({ enabled: false, hashtagAlwaysAdd: [], hashtagKeywordMap: [] })),
 });
 
 export const ConnectionCreateInputSchema = z.object({
