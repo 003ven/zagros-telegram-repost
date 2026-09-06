@@ -638,7 +638,9 @@ export class TelegramService {
       const escapeHtmlForHeader = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       let classified = classifyAndFormat(text, {
         alwaysAdd: config.contentClassifier.hashtagAlwaysAdd,
-        keywordMap: config.contentClassifier.hashtagKeywordMap,
+        keywordMap: (config.contentClassifier.hashtagKeywordMap || [])
+          .filter((r) => r && r.keyword && r.hashtag)
+          .map((r) => ({ keyword: r.keyword as string, hashtag: r.hashtag as string })),
       });
       if (config.customHeader && config.customHeader.trim()) {
         classified = `${escapeHtmlForHeader(config.customHeader.trim())}\n\n${classified}`;
