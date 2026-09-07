@@ -183,14 +183,15 @@ export const ConnectionRulesModal: React.FC<Props> = ({
   const [contentClassifierEnabled, setContentClassifierEnabled] = useState(
     currentConfig.contentClassifier?.enabled || false
   );
-  const [hashtagAlwaysAddInput, setHashtagAlwaysAddInput] = useState(
-    (currentConfig.contentClassifier?.hashtagAlwaysAdd || []).join(', ')
+  const [hashtagAlwaysAdd, setHashtagAlwaysAdd] = useState<string[]>(
+    currentConfig.contentClassifier?.hashtagAlwaysAdd || []
   );
-  const [hashtagKeywordMapInput, setHashtagKeywordMapInput] = useState(
-    (currentConfig.contentClassifier?.hashtagKeywordMap || [])
-      .map((r) => `${r.keyword}=${r.hashtag}`)
-      .join(', ')
+  const [newHashtagAlwaysAdd, setNewHashtagAlwaysAdd] = useState('');
+  const [hashtagKeywordMap, setHashtagKeywordMap] = useState<{ keyword: string; hashtag: string }[]>(
+    currentConfig.contentClassifier?.hashtagKeywordMap || []
   );
+  const [newHashtagKeyword, setNewHashtagKeyword] = useState('');
+  const [newHashtagForKeyword, setNewHashtagForKeyword] = useState('');
   const [customFooter, setCustomFooter] = useState(currentConfig.customFooter || '');
 
   // Filter state
@@ -261,6 +262,28 @@ export const ConnectionRulesModal: React.FC<Props> = ({
 
   const handleRemoveRule = (id: string) => {
     setReplaceRules(replaceRules.filter((r) => r.id !== id));
+  };
+  const handleAddHashtagAlwaysAdd = () => {
+    const val = newHashtagAlwaysAdd.trim().replace(/^#/, '');
+    if (!val) return;
+    if (hashtagAlwaysAdd.some((h) => h.toLowerCase() === val.toLowerCase())) return;
+    setHashtagAlwaysAdd([...hashtagAlwaysAdd, val]);
+    setNewHashtagAlwaysAdd('');
+  };
+  const handleRemoveHashtagAlwaysAdd = (val: string) => {
+    setHashtagAlwaysAdd(hashtagAlwaysAdd.filter((h) => h !== val));
+  };
+  const handleAddHashtagKeywordMap = () => {
+    if (!newHashtagKeyword.trim() || !newHashtagForKeyword.trim()) return;
+    setHashtagKeywordMap([
+      ...hashtagKeywordMap,
+      { keyword: newHashtagKeyword.trim(), hashtag: newHashtagForKeyword.trim().replace(/^#/, '') },
+    ]);
+    setNewHashtagKeyword('');
+    setNewHashtagForKeyword('');
+  };
+  const handleRemoveHashtagKeywordMap = (index: number) => {
+    setHashtagKeywordMap(hashtagKeywordMap.filter((_, i) => i !== index));
   };
   const handleAddLinkRule = () => {
     if (!newLinkSearch.trim()) return;
@@ -411,14 +434,8 @@ export const ConnectionRulesModal: React.FC<Props> = ({
     if (cfg.aiRewrite !== undefined) setAiRewrite(cfg.aiRewrite);
     if (cfg.aiTranslate) setAiTranslate(cfg.aiTranslate);
     if (cfg.contentClassifier?.enabled !== undefined) setContentClassifierEnabled(cfg.contentClassifier.enabled);
-    if (cfg.contentClassifier?.hashtagAlwaysAdd) {
-      setHashtagAlwaysAddInput(cfg.contentClassifier.hashtagAlwaysAdd.join(', '));
-    }
-    if (cfg.contentClassifier?.hashtagKeywordMap) {
-      setHashtagKeywordMapInput(
-        cfg.contentClassifier.hashtagKeywordMap.map((r) => `${r.keyword}=${r.hashtag}`).join(', ')
-      );
-    }
+    if (cfg.contentClassifier?.hashtagAlwaysAdd) setHashtagAlwaysAdd(cfg.contentClassifier.hashtagAlwaysAdd);
+    if (cfg.contentClassifier?.hashtagKeywordMap) setHashtagKeywordMap(cfg.contentClassifier.hashtagKeywordMap);
 
     setPresetNotification(`تنظیمات پریست "${preset.name}" با موفقیت جایگذاری شد.`);
     setTimeout(() => setPresetNotification(null), 4000);
@@ -534,19 +551,8 @@ export const ConnectionRulesModal: React.FC<Props> = ({
       aiTranslate,
       contentClassifier: {
         enabled: contentClassifierEnabled,
-        hashtagAlwaysAdd: hashtagAlwaysAddInput
-          .split(',')
-          .map((h) => h.trim())
-          .filter(Boolean),
-        hashtagKeywordMap: hashtagKeywordMapInput
-          .split(',')
-          .map((pair) => pair.trim())
-          .filter(Boolean)
-          .map((pair) => {
-            const [keyword, hashtag] = pair.split('=').map((s) => s.trim());
-            return { keyword: keyword || '', hashtag: hashtag || keyword || '' };
-          })
-          .filter((r) => r.keyword && r.hashtag),
+        hashtagAlwaysAdd,
+        hashtagKeywordMap,
       },
     };
 
@@ -1786,28 +1792,116 @@ ${
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-white flex items-center gap-2">
                   <Tags className="w-4 h-4 text-orange-400" />
-                  هشتگ‌هایی که همیشه اضافه شوند (با ویرگول جدا کنید):
+                  هشتگ‌هایی که همیشه اضافه شوند:
                 </label>
-                <input
-                  type="text"
-                  value={hashtagAlwaysAddInput}
-                  onChange={(e) => setHashtagAlwaysAddInput(e.target.value)}
-                  placeholder="مثال: Zagros_VPN, VPN"
-                  className="w-full p-3 text-xs bg-[#0a0a0a] border border-white/15 rounded-xl text-white focus:outline-none focus:border-orange-500"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newHashtagAlwaysAdd}
+                    onChange={(e) => setNewHashtagAlwaysAdd(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddHashtagAlwaysAdd();
+                      }
+                    }}
+                    placeholder="مثال: Zagros_VPN"
+                    className="flex-1 px-3 py-2 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white focus:outline-none focus:border-orange-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddHashtagAlwaysAdd}
+                    disabled={!newHashtagAlwaysAdd.trim()}
+                    className="px-3 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-lg"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+                {hashtagAlwaysAdd.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {hashtagAlwaysAdd.map((h) => (
+                      <span
+                        key={h}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs font-mono-code"
+                      >
+                        #{h}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveHashtagAlwaysAdd(h)}
+                          className="text-red-400 hover:text-red-300"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-white flex items-center gap-2">
                   <Tags className="w-4 h-4 text-orange-400" />
-                  تبدیل کلمه به هشتگ (فرمت: کلمه=هشتگ، با ویرگول جدا کنید):
+                  تبدیل کلمه به هشتگ:
                 </label>
-                <input
-                  type="text"
-                  value={hashtagKeywordMapInput}
-                  onChange={(e) => setHashtagKeywordMapInput(e.target.value)}
-                  placeholder="مثال: پروکسی=Proxy, کانفیگ=Config"
-                  className="w-full p-3 text-xs bg-[#0a0a0a] border border-white/15 rounded-xl text-white focus:outline-none focus:border-orange-500"
-                />
+                <div className="p-4 rounded-xl bg-[#18181b] border border-white/10 space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] text-white/60 mb-1">کلمه‌ی کلیدی (مثلاً پروکسی):</label>
+                      <input
+                        type="text"
+                        value={newHashtagKeyword}
+                        onChange={(e) => setNewHashtagKeyword(e.target.value)}
+                        placeholder="پروکسی"
+                        className="w-full px-3 py-2 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white focus:outline-none focus:border-orange-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-white/60 mb-1">هشتگ متناظر (مثلاً Proxy):</label>
+                      <input
+                        type="text"
+                        value={newHashtagForKeyword}
+                        onChange={(e) => setNewHashtagForKeyword(e.target.value)}
+                        placeholder="Proxy"
+                        className="w-full px-3 py-2 text-xs bg-[#0a0a0a] border border-white/15 rounded-lg text-white focus:outline-none focus:border-orange-500"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddHashtagKeywordMap}
+                    disabled={!newHashtagKeyword.trim() || !newHashtagForKeyword.trim()}
+                    className="w-full py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-medium text-xs rounded-lg flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    افزودن قانون کلمه‌به‌هشتگ
+                  </button>
+                </div>
+                {hashtagKeywordMap.length > 0 && (
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {hashtagKeywordMap.map((rule, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-3 rounded-lg bg-[#18181b] border border-white/10 text-xs"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono-code text-orange-400 bg-orange-500/10 px-2 py-1 rounded border border-orange-500/20">
+                            {rule.keyword}
+                          </span>
+                          <span className="text-white/40">➔</span>
+                          <span className="font-mono-code text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+                            #{rule.hashtag}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveHashtagKeywordMap(index)}
+                          className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/10 rounded"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <p className="text-[11px] text-white/40">
                   اگر هرکدام از این کلمات در متن پست پیدا شود، هشتگ متناظرش (اگر از قبل نبود) به انتهای پست اضافه می‌شود.
                 </p>
