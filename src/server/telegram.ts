@@ -1109,8 +1109,7 @@ export class TelegramService {
       config.removeMentions ||
       (config.linkReplaceRules && config.linkReplaceRules.length > 0) ||
       config.aiRewrite ||
-      (config.aiTranslate && config.aiTranslate !== 'none') ||
-      !!config.contentClassifier?.enabled;
+      (config.aiTranslate && config.aiTranslate !== 'none');
 
     if (!hasModifications && message.mediaType !== 'media_group' && message.mediaType !== 'document_group') {
       // Try copyMessage (cheapest path — Telegram handles the media transfer
