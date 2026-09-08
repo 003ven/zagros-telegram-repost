@@ -827,6 +827,7 @@ async function startServer() {
   await TelegramService.startAllActiveConnections();
   startUptimeSampler();
   startWatchReconciler();
+  startReactionPoller();
   startScheduledPostRunner();
 
   const app = await createApp({ mountFrontend: true });
@@ -845,6 +846,21 @@ async function startServer() {
  * فاز ۴: هر ۵ دقیقه تمام پل‌های فعال در حالت push را دوباره به یوزربات
  * معرفی می‌کند (self-healing در برابر ری‌استارت مستقل یوزربات).
  */
+/**
+ * فاز ۶: هر ۳۰ ثانیه، آپدیت‌های message_reaction_count را از تلگرام
+ * می‌گیرد و روی OutboundPost ذخیره‌شده می‌نشاند — رصد تعامل واقعی کاربران.
+ */
+function startReactionPoller() {
+  const run = async () => {
+    try {
+      await TelegramService.pollReactionUpdates();
+    } catch (err) {
+      logger.error({ err }, 'پولینگ آپدیت ری‌اکشن شکست خورد');
+    }
+  };
+  run();
+  setInterval(run, 30 * 1000);
+}
 function startWatchReconciler() {
   const run = async () => {
     try {

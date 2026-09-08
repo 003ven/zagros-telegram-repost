@@ -322,6 +322,55 @@ export class Storage {
     }
   }
 
+  // --- فاز ۶: رصد تعامل واقعی (ری‌اکشن‌های کاربران) ---
+  private static normalizeChannel(channel: string): string {
+    return channel.trim().replace(/^@/, '').toLowerCase();
+  }
+  /** بلافاصله بعد از هر ارسال موفق صدا زده می‌شود (مستقل از فعال‌بودن
+   * seedReaction) تا بعداً بشود ری‌اکشن واقعی کاربران را رویش نگاشت کرد.
+   * idempotent — صدا زدن دوباره برای همان (targetChannel, messageId) فقط
+   * connectionId/sentAt را به‌روز می‌کند، رکورد تکراری نمی‌سازد. */
+  public static async recordOutboundPost(
+    connectionId: string,
+    targetChannel: string,
+    messageId: number
+  ): Promise<void> {
+    const normalized = Storage.normalizeChannel(targetChannel);
+    await prisma.outboundPost.upsert({
+      where: { targetChannel_messageId: { targetChannel: normalized, messageId } },
+      create: { connectionId, targetChannel: normalized, messageId },
+      update: { connectionId },
+    });
+  }
+  /** با آپدیت message_reaction_count از تلگرام صدا زده می‌شود. اگر پستی با
+   * این (targetChannel, messageId) ردیابی نشده باشد (مثلاً قبل از فعال‌شدن
+   * این فیچر ارسال شده)، بی‌سروصدا نادیده گرفته می‌شود. */
+  public static async updatePostReactions(
+    targetChannel: string,
+    messageId: number,
+    reactions: Record<string, number>
+  ): Promise<void> {
+    const normalized = Storage.normalizeChannel(targetChannel);
+    try {
+      await prisma.outboundPost.update({
+        where: { targetChannel_messageId: { targetChannel: normalized, messageId } },
+        data: { reactions, reactionsUpdatedAt: new Date() },
+      });
+    } catch {
+      // پست ردیابی‌نشده — بی‌خطر، فقط نادیده می‌گیریم
+    }
+  }
+  public static async getUpdateOffset(botTokenHash: string): Promise<number> {
+    const row = await prisma.telegramUpdateOffset.findUnique({ where: { botTokenHash } });
+    return row?.lastUpdateId ?? 0;
+  }
+  public static async setUpdateOffset(botTokenHash: string, updateId: number): Promise<void> {
+    await prisma.telegramUpdateOffset.upsert({
+      where: { botTokenHash },
+      create: { botTokenHash, lastUpdateId: updateId },
+      update: { lastUpdateId: updateId },
+    });
+  }
   /** فقط برای تست‌ها: اتصال Prisma را می‌بندد تا فرآیند تست بدون
    * handle باز خاتمه یابد. */
   public static async disconnect(): Promise<void> {

@@ -1493,6 +1493,57 @@ export class TelegramService {
       logger.warn({ err: e, connId: conn.id }, 'بذرپاشی ری‌اکشن شکست خورد (بی‌خطر)');
     }
   }
+  /**
+   * فاز ۶: هر چند ثانیه یک‌بار (نگاه کن به startReactionPoller در server.ts)
+   * برای هر توکن distinct موجود در پل‌ها، getUpdates را با
+   * allowed_updates=['message_reaction_count'] صدا می‌زند (کانال‌ها
+   * پیش‌فرض ری‌اکشن ناشناس/تجمعی دارند، نه per-user). هر آپدیت را با
+   * (targetChannel نرمال‌شده, message_id) به OutboundPost مچ می‌کند.
+   * کاملاً best-effort — خطا فقط لاگ می‌شود.
+   */
+  public static async pollReactionUpdates(): Promise<void> {
+    const connections = await Storage.getAllConnections();
+    const tokens = [...new Set(connections.map((c) => c.botToken.trim()).filter(Boolean))];
+    for (const token of tokens) {
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      try {
+        const offset = await Storage.getUpdateOffset(tokenHash);
+        const res = await fetch(`${getTelegramApiBase()}/bot${token}/getUpdates`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            offset: offset > 0 ? offset + 1 : 0,
+            timeout: 0,
+            allowed_updates: ['message_reaction_count'],
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        const data = await res.json();
+        if (!data || !data.ok || !Array.isArray(data.result) || data.result.length === 0) continue;
+        let maxUpdateId = offset;
+        for (const update of data.result) {
+          if (typeof update.update_id === 'number' && update.update_id > maxUpdateId) {
+            maxUpdateId = update.update_id;
+          }
+          const mrc = update.message_reaction_count;
+          const username = mrc?.chat?.username;
+          const messageId = mrc?.message_id;
+          if (!username || typeof messageId !== 'number' || !Array.isArray(mrc.reactions)) continue;
+          const reactionsMap: Record<string, number> = {};
+          for (const r of mrc.reactions) {
+            const key = r?.type?.type === 'emoji' ? r.type.emoji : r?.type?.type || 'other';
+            reactionsMap[key] = (reactionsMap[key] || 0) + (r?.total_count || 0);
+          }
+          await Storage.updatePostReactions(username, messageId, reactionsMap);
+        }
+        if (maxUpdateId > offset) {
+          await Storage.setUpdateOffset(tokenHash, maxUpdateId);
+        }
+      } catch (e) {
+        logger.warn({ err: e }, 'پولینگ آپدیت ری‌اکشن شکست خورد (بی‌خطر)');
+      }
+    }
+  }
   private static notifyOutboundWebhook(conn: TelegramConnection, event: Record<string, unknown>): void {
     const url = conn.config.webhookUrl;
     if (!url) return;
@@ -1711,6 +1762,11 @@ export class TelegramService {
         textPreview: (processResult.processedText || '').substring(0, 200),
       });
       await TelegramService.applySeedReaction(conn, sendResult.messageId);
+      if (sendResult.messageId) {
+        await Storage.recordOutboundPost(conn.id, conn.targetChannel, sendResult.messageId).catch((e) =>
+          logger.warn({ err: e, connId: conn.id }, 'ثبت پست برای ردیابی ری‌اکشن شکست خورد (بی‌خطر)')
+        );
+      }
 
       await Storage.addLog(
         connId,

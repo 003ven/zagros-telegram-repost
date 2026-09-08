@@ -114,3 +114,31 @@ model SystemSetting {
   value     String
   updatedAt DateTime @updatedAt
 }
+
+// فاز ۶: رصد تعامل واقعی — هر پیام ارسالی + آخرین شمارش ری‌اکشن‌های واقعی
+// کاربران (message_reaction_count، تجمعی و بدون هویت چون کانال‌ها پیش‌فرض
+// ناشناس‌اند). targetChannel نرمال‌شده (بدون @، lowercase) چون هنوز chat_id
+// عددی را در مسیر ارسال ذخیره نمی‌کنیم؛ برای کانال‌های بدون یوزرنیم عمومی
+// این ردیابی کار نمی‌کند.
+model OutboundPost {
+  id                 String    @id @default(cuid())
+  connectionId       String
+  targetChannel      String
+  messageId          Int
+  sentAt             DateTime  @default(now())
+  reactions          Json?
+  reactionsUpdatedAt DateTime?
+  @@unique([targetChannel, messageId])
+  @@index([connectionId])
+}
+
+// فاز ۶: آخرین update_id دیده‌شده به‌ازای هر بات (چون چند پل می‌توانند یک
+// توکن مشترک داشته باشند، پولینگ per-token است نه per-connection).
+// botTokenHash هش SHA256 خودِ توکن است، نه خودِ توکن — برای اینکه سکرت خام
+// یک‌جای دیگر هم ذخیره نشود.
+model TelegramUpdateOffset {
+  botTokenHash String   @id
+  lastUpdateId Int      @default(0)
+  updatedAt    DateTime @updatedAt
+}
+
