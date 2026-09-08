@@ -634,7 +634,15 @@ export class TelegramService {
     }
     // اگه تشخیص محتوا برای این پل فعاله، خروجیش (بازسازی فعال، نه فقط
     // حفظ فرمت اصلی) جایگزین هرچی بالا محاسبه شد می‌شه.
-    if (config.contentClassifier?.enabled) {
+    // ⚠️ غیرفعال موقت (۸ شهریور ۱۴۰۵): این بلاک بدون قید و شرط هر HTML
+    // درستی که بالاتر از entity های اصلی پیام (لینک‌ها/فرمت‌بندی واقعی)
+    // ساخته شده بود رو با بازسازی خودش (که فقط از رو متن خام کار می‌کنه و
+    // هیچ‌جوره namknow لینک‌های entity-based نیست) جایگزین می‌کرد - نتیجه‌ش
+    // گم‌شدن کامل لینک‌های کلیک‌پذیر پست‌هایی مثل لیست پروکسی‌ها بود. تا
+    // وقتی این فیچر با منطق «فقط وقتی واقعاً چیزی برای بهتر کردن هست وارد
+    // عمل شو» بازطراحی نشه، غیرفعاله. (contentClassifier.ts دست‌نخورده
+    // می‌مونه، فقط اینجا صداش نمی‌زنیم.)
+    if (false && config.contentClassifier?.enabled) {
       const escapeHtmlForHeader = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       let classified = classifyAndFormat(text, {
         alwaysAdd: config.contentClassifier.hashtagAlwaysAdd,
