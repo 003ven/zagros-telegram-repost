@@ -94,6 +94,38 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     appliesTo: 'userbot',
     envVar: 'TELEGRAM_API_HASH',
   },
+  {
+    key: 'ALERT_BOT_TOKEN',
+    label: 'توکن بات هشدار خطا',
+    description: 'فاز ۷: توکن باتی که پیام هشدار «فلان پل پشت‌سرهم خطا می‌دهد» را می‌فرستد. می‌تواند همان بات پل‌ها یا یک بات جدا باشد. خالی یعنی این فیچر کاملاً خاموش است.',
+    sensitive: true,
+    appliesTo: 'node',
+    envVar: 'ALERT_BOT_TOKEN',
+  },
+  {
+    key: 'ALERT_CHAT_ID',
+    label: 'چت مقصد هشدار خطا',
+    description: 'فاز ۷: شناسه یا یوزرنیم چتی که بات هشدار خطا پیام را به آن می‌فرستد (مثلاً چت خصوصی خودتان با آن بات، یا یک کانال جدا). خالی یعنی این فیچر خاموش است.',
+    sensitive: false,
+    appliesTo: 'node',
+    envVar: 'ALERT_CHAT_ID',
+  },
+  {
+    key: 'ALERT_ERROR_THRESHOLD',
+    label: 'آستانه‌ی خطای متوالی برای هشدار',
+    description: 'فاز ۷: بعد از چند خطای متوالی پشت‌سرهم روی یک پل، هشدار فرستاده شود. پیش‌فرض اگر خالی باشد: ۵.',
+    sensitive: false,
+    appliesTo: 'node',
+    envVar: 'ALERT_ERROR_THRESHOLD',
+  },
+  {
+    key: 'ALERT_COOLDOWN_MINUTES',
+    label: 'حداقل فاصله بین دو هشدار (دقیقه)',
+    description: 'فاز ۷: بعد از فرستادن یک هشدار برای یک پل، حداقل چند دقیقه صبر شود قبل از هشدار بعدی برای همان پل (تا اسپم نشود، ولی اگر پل مدت‌ها خراب ماند، دوباره یادآوری شود). پیش‌فرض اگر خالی باشد: ۶۰.',
+    sensitive: false,
+    appliesTo: 'node',
+    envVar: 'ALERT_COOLDOWN_MINUTES',
+  },
 ];
 
 const USERBOT_ECOSYSTEM_PATH = path.join(process.cwd(), 'userbot', 'ecosystem.userbot.config.cjs');

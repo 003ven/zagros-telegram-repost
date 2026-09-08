@@ -31,6 +31,7 @@ model Connection {
   lastError       String?
   consecutiveErrors Int    @default(0)
   pollIntervalMs  Int      @default(15000)
+  lastErrorAlertAt DateTime?  // فاز ۷: آخرین‌بار هشدار خطای متوالی فرستاده شد (برای cooldown per-پل)
   // شکل کامل TelegramConnectionConfig (src/schemas.ts) به‌صورت JSON —
   // چون این شمای زودتغییر است (فیلد جدید هر بار طبق
   // references/extension-recipes.md اضافه می‌شود)، ستون‌بندی جدا برای

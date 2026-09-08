@@ -1552,6 +1552,38 @@ export class TelegramService {
       }
     }
   }
+  /**
+   * فاز ۷: وقتی consecutiveErrors یک پل به آستانه‌ی تنظیم‌شده می‌رسد، یک‌بار
+   * (نه هر بار) هشدار می‌فرستد — با رعایت cooldown جداگانه per-پل. اگر
+   * ALERT_BOT_TOKEN/ALERT_CHAT_ID تنظیم نشده باشند، کاملاً بی‌اثر است.
+   * conn.lastErrorAlertAt را در حافظه ست می‌کند؛ persist شدنش به عهده‌ی
+   * saveConnection ای است که صدازننده‌ی این تابع خودش بعداً انجام می‌دهد.
+   */
+  private static async maybeSendErrorAlert(conn: TelegramConnection): Promise<void> {
+    const alertBotToken = process.env.ALERT_BOT_TOKEN;
+    const alertChatId = process.env.ALERT_CHAT_ID;
+    if (!alertBotToken || !alertChatId) return;
+    const threshold = parseInt(process.env.ALERT_ERROR_THRESHOLD || '5', 10) || 5;
+    const cooldownMinutes = parseInt(process.env.ALERT_COOLDOWN_MINUTES || '60', 10) || 60;
+    const count = conn.consecutiveErrors || 0;
+    if (count < threshold) return;
+    const lastAlertMs = conn.lastErrorAlertAt ? new Date(conn.lastErrorAlertAt).getTime() : 0;
+    if (Date.now() - lastAlertMs < cooldownMinutes * 60 * 1000) return;
+    conn.lastErrorAlertAt = new Date().toISOString();
+    try {
+      await fetch(`${getTelegramApiBase()}/bot${alertBotToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: alertChatId,
+          text: `⚠️ پل «${conn.sourceChannel} → ${conn.targetChannel}» ${count} بار متوالی خطا داده.\nآخرین خطا: ${conn.lastError || 'نامشخص'}`,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (e) {
+      logger.warn({ err: e, connId: conn.id }, 'ارسال هشدار خطای متوالی شکست خورد (بی‌خطر)');
+    }
+  }
   private static notifyOutboundWebhook(conn: TelegramConnection, event: Record<string, unknown>): void {
     const url = conn.config.webhookUrl;
     if (!url) return;
@@ -1790,6 +1822,7 @@ export class TelegramService {
       conn.status = 'error';
       conn.lastError = sendResult.error || 'خطا در ارسال پست به مقصد';
       conn.updatedAt = new Date().toISOString();
+      await TelegramService.maybeSendErrorAlert(conn);
 
       // ⚠️ رفع باگ واقعی مشاهده‌شده در production (زاگرس، ۱۷ مرداد ۱۴۰۴):
       // قبل از این رفع، وقتی یک پست به‌طور دائمی قابل ارسال نبود (مثلاً
@@ -1963,6 +1996,7 @@ export class TelegramService {
       conn.status = 'error';
       conn.lastError = errMsg;
       conn.updatedAt = new Date().toISOString();
+      await TelegramService.maybeSendErrorAlert(conn);
       await Storage.saveConnection(conn);
 
       await Storage.addLog(
