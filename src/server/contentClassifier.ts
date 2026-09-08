@@ -23,15 +23,19 @@ type Segment =
   | { kind: 'hashtag'; content: string }
   | { kind: 'link'; url: string; standalone: boolean; internal: boolean };
 
+// نکته: فلگ u اضافه شد تا بشه تو کلاس کاراکتر هشتگ از \p{L}/\p{N} یونیکد-آگاه
+// استفاده کرد - نه بلوک خام \u0600-\u06FF که چند نشونه‌ی نگارشی عربی/فارسی
+// (، ؛ ؟) رو هم به‌اشتباه «حرف» حساب می‌کرد و باعث چسبیدنشون به هشتگ می‌شد،
+// و شامل نیم‌فاصله (ZWNJ) هم نمی‌شد که هشتگ‌های ترکیبی فارسی رو وسط می‌شکافت.
 const MASTER_PATTERN = new RegExp(
   [
     `(?<config>\\b(?:vless|vmess|trojan|ssr?|socks5?|hysteria2?):\\/\\/[^\\s<]+)`,
     `(?<tgproxy>(?:https?:\\/\\/t\\.me\\/proxy\\?|tg:\\/\\/proxy\\?)[^\\s<]+)`,
     `(?<tmelink>https?:\\/\\/t\\.me\\/[^\\s<]+)`,
     `(?<url>https?:\\/\\/[^\\s<]+)`,
-    `(?<hashtag>#[\\w\\u0600-\\u06FF]+)`,
+    `(?<hashtag>#[\\p{L}\\p{N}\\p{Pc}\\u200c\\u200d]+)`,
   ].join('|'),
-  'gi'
+  'giu'
 );
 
 // آستانه بالا نگه داشته شده تا فقط متن‌های واقعاً قابل‌توجه (نه یه بلوک
@@ -41,12 +45,30 @@ const BLOCKQUOTE_THRESHOLD = 200;
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+// برای مقادیری که داخل یه attribute با کوتیشن دوبل رندر می‌شن (مثل href)؛
+// escapeHtml معمولی کوتیشن رو escape نمی‌کنه و می‌تونه attribute رو بشکنه.
+function escapeHtmlAttr(s: string): string {
+  return escapeHtml(s).replace(/"/g, '&quot;');
+}
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 function normalizeHashtag(h: string): string {
   const trimmed = h.trim();
   return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+}
+// علامت نگارشیِ چسبیده به آخر یه لینک/کانفیگ (نقطه، ویرگول فارسی، پرانتز
+// بسته‌ی بدون‌جفت و...) جزو خودِ متن نیست - این باگ واقعی موقع تست با محتوای
+// فارسی واقعی پیدا شد (پرانتز بسته‌ی دور یه کانفیگ داشت جزو کانفیگ کپی می‌شد).
+function trimTrailingPunctuation(s: string): string {
+  let result = s;
+  while (result.endsWith(')')) {
+    const opens = (result.match(/\(/g) || []).length;
+    const closes = (result.match(/\)/g) || []).length;
+    if (closes > opens) result = result.slice(0, -1);
+    else break;
+  }
+  return result.replace(/[.,;:!?\]}»"'،؛؟]+$/, '');
 }
 
 function tokenize(raw: string): RawSegment[] {
@@ -57,8 +79,10 @@ function tokenize(raw: string): RawSegment[] {
     if (index > lastIndex) rawSegments.push({ kind: 'text', content: raw.slice(lastIndex, index) });
     const groups = match.groups || {};
     const type = (Object.keys(groups) as RawSegmentKind[]).find((k) => groups[k] !== undefined);
-    rawSegments.push({ kind: type || 'text', content: match[0] });
-    lastIndex = index + match[0].length;
+    let content = match[0];
+    if (type && type !== 'hashtag') content = trimTrailingPunctuation(content);
+    rawSegments.push({ kind: type || 'text', content });
+    lastIndex = index + content.length;
   }
   if (lastIndex < raw.length) rawSegments.push({ kind: 'text', content: raw.slice(lastIndex) });
   return rawSegments;
@@ -69,7 +93,7 @@ function segmentText(raw: string): Segment[] {
   const standaloneUrls = new Set<string>();
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
-    if (/^https?:\/\/[^\s<]+$/i.test(trimmed)) standaloneUrls.add(trimmed);
+    if (/^https?:\/\/[^\s<]+$/i.test(trimmed)) standaloneUrls.add(trimTrailingPunctuation(trimmed));
   }
 
   // ادغام config/tgproxyهای پشت‌سرهم با lookahead (فقط وقتی فاصله رو
@@ -126,6 +150,15 @@ export function classifyAndFormat(raw: string, hashtagConfig?: HashtagConfig): s
   // پیدا شد (یه پست نرخ ارز بدون هیچ کانفیگی).
   const hasDataElement = segments.some((s) => s.kind === 'config_group' || s.kind === 'link');
 
+  // طول رو رو‌ی مجموع کل تکه‌های «متن» پست حساب می‌کنیم، نه هر تکه به‌تنهایی -
+  // وگرنه یه هشتگ/لینک/کانفیگ وسط یه پاراگراف طولانی، پاراگراف رو به تکه‌های
+  // زیرِ آستانه می‌شکافت و کل متن از blockquote در می‌رفت (باگ واقعی، با
+  // تست پیدا شد).
+  const totalTextLength = segments
+    .filter((s) => s.kind === 'text')
+    .reduce((sum, s) => sum + s.content.trim().length, 0);
+  const shouldBlockquote = hasDataElement && totalTextLength > BLOCKQUOTE_THRESHOLD;
+
   // --- تشخیص هشتگ‌های موجود + محاسبه‌ی هشتگ‌های جدیدی که طبق تنظیمات
   // این پل باید اضافه بشن ---
   const existingHashtags = new Set(segments.filter((s) => s.kind === 'hashtag').map((s) => s.content.toLowerCase()));
@@ -139,8 +172,11 @@ export function classifyAndFormat(raw: string, hashtagConfig?: HashtagConfig): s
       toAdd.push(normalized);
     }
   };
-  for (const h of hashtagConfig?.alwaysAdd ?? []) tryAdd(h);
+  for (const h of hashtagConfig?.alwaysAdd ?? []) {
+    if (h && h.trim()) tryAdd(h);
+  }
   for (const { keyword, hashtag } of hashtagConfig?.keywordMap ?? []) {
+    if (!keyword || !keyword.trim() || !hashtag || !hashtag.trim()) continue;
     // توجه: \b جاوااسکریپت فقط حروف انگلیسی رو «حرف» حساب می‌کنه؛ برای
     // فارسی/عربی کار نمی‌کنه. به‌جاش با \p{L}/\p{N} یونیکد-آگاه مرز
     // کلمه رو دستی می‌سازیم (این باگ واقعی موقع تست پیدا شد).
@@ -177,7 +213,7 @@ export function classifyAndFormat(raw: string, hashtagConfig?: HashtagConfig): s
     } else if (seg.kind === 'link') {
       if (seg.standalone) {
         const label = seg.internal ? '🔗 مشاهده در کانال' : '🔍 مشاهده لینک';
-        htmlParts.push(`<a href="${escapeHtml(seg.url)}">${label}</a>`);
+        htmlParts.push(`<a href="${escapeHtmlAttr(seg.url)}">${label}</a>`);
       } else {
         htmlParts.push(escapeHtml(seg.url));
       }
@@ -186,7 +222,7 @@ export function classifyAndFormat(raw: string, hashtagConfig?: HashtagConfig): s
       const trailing = (seg.content.match(/\s*$/) || [''])[0];
       const core = seg.content.slice(leading.length, seg.content.length - trailing.length);
       if (!core) htmlParts.push(seg.content);
-      else if (hasDataElement && core.length > BLOCKQUOTE_THRESHOLD)
+      else if (shouldBlockquote)
         htmlParts.push(`${leading}<blockquote>${escapeHtml(core)}</blockquote>${trailing}`);
       else htmlParts.push(escapeHtml(seg.content));
     }

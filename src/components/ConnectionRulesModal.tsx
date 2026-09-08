@@ -461,6 +461,9 @@ export const ConnectionRulesModal: React.FC<Props> = ({
         replaceRules,
         removeLinks,
         removeMentions,
+        removeInlineButtons,
+        linkReplaceRules,
+        buttonReplaceRules,
         skipDuplicateContent,
         webhookUrl,
         customHeader,
@@ -475,6 +478,11 @@ export const ConnectionRulesModal: React.FC<Props> = ({
         activeDays,
         aiRewrite,
         aiTranslate,
+        contentClassifier: {
+          enabled: contentClassifierEnabled,
+          hashtagAlwaysAdd,
+          hashtagKeywordMap,
+        },
       },
     };
 
@@ -1903,7 +1911,7 @@ ${
                   </div>
                 )}
                 <p className="text-[11px] text-white/40">
-                  اگر هرکدام از این کلمات در متن پست پیدا شود، هشتگ متناظرش (اگر از قبل نبود) به انتهای پست اضافه می‌شود.
+                  اگر هرکدام از این کلمات در متن پست پیدا شود، هشتگ متناظرش (اگر از قبل نبود) اضافه می‌شود — کنار آخرین هشتگ موجود در پست، یا اگر پست هشتگی نداشت، در انتهای آن.
                 </p>
               </div>
             </div>
