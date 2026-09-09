@@ -323,6 +323,9 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
         });
       }
       const newConfig = partialResult.data;
+      await Storage.recordConfigVersion(id, conn.config).catch((e) =>
+        logger.warn({ err: e, connId: id }, 'ثبت نسخه‌ی قبلی تنظیمات شکست خورد (بی‌خطر)')
+      );
       conn.config = {
         ...TelegramService.getDefaultConfig(),
         ...(conn.config || {}),
@@ -336,6 +339,44 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
       return res.json({ success: true, connection: conn });
     } catch (err) {
       return res.status(500).json({ success: false, error: 'خطا در ذخیره تنظیمات اتصال' });
+    }
+  });
+
+  // فاز ۹: تاریخچه‌ی تنظیمات یک پل
+  app.get('/api/connections/:id/config-versions', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const conn = await Storage.getConnection(id);
+      if (!conn) {
+        return res.status(404).json({ success: false, error: 'اتصال یافت نشد' });
+      }
+      const versions = await Storage.getConfigVersions(id);
+      return res.json({ success: true, versions });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'خطا در دریافت تاریخچه‌ی تنظیمات' });
+    }
+  });
+  // فاز ۹: بازگردانی تنظیمات به یک نسخه‌ی قدیمی‌تر — قبلش نسخه‌ی فعلی هم
+  // snapshot می‌شود تا خودِ این عمل هم قابل بازگشت بماند.
+  app.post('/api/connections/:id/config-versions/:versionId/restore', async (req, res) => {
+    try {
+      const { id, versionId } = req.params;
+      const conn = await Storage.getConnection(id);
+      if (!conn) {
+        return res.status(404).json({ success: false, error: 'اتصال یافت نشد' });
+      }
+      const oldConfig = await Storage.getConfigVersion(id, versionId);
+      if (!oldConfig) {
+        return res.status(404).json({ success: false, error: 'نسخه‌ی موردنظر یافت نشد' });
+      }
+      await Storage.recordConfigVersion(id, conn.config);
+      conn.config = oldConfig;
+      conn.updatedAt = new Date().toISOString();
+      await Storage.saveConnection(conn);
+      await Storage.addLog(id, 'info', 'تنظیمات پل به یک نسخه‌ی قبلی بازگردانده شد');
+      return res.json({ success: true, connection: conn });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'خطا در بازگردانی نسخه‌ی تنظیمات' });
     }
   });
 

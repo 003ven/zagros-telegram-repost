@@ -42,6 +42,17 @@ model Connection {
   @@index([status])
 }
 
+// فاز ۹: تاریخچه‌ی تنظیمات هر پل — هر بار PUT /api/connections/:id/config
+// صدا زده می‌شود، شکل *قبلی* config قبل از رونویسی اینجا snapshot می‌شود.
+// حداکثر ۲۰ نسخه‌ی آخر per پل نگه داشته می‌شود.
+model ConnectionConfigVersion {
+  id           String   @id @default(cuid())
+  connectionId String
+  config       Json
+  createdAt    DateTime @default(now())
+  @@index([connectionId, createdAt])
+}
+
 model LogEntry {
   id           String   @id @default(cuid())
   // 'system' یک مقدار خاص (نه یک id واقعی پل) برای رویدادهای سراسری

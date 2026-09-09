@@ -1,5 +1,5 @@
 import { PrismaClient, Prisma } from '@prisma/client';
-import { TelegramConnection, LogEntry, ScheduledPost } from '../types';
+import { TelegramConnection, LogEntry, ScheduledPost, TelegramConnectionConfig } from '../types';
 import { logger } from './logger';
 
 /**
@@ -376,6 +376,40 @@ export class Storage {
       create: { botTokenHash, lastUpdateId: updateId },
       update: { lastUpdateId: updateId },
     });
+  }
+  // --- فاز ۹: تاریخچه‌ی تنظیمات هر پل ---
+  private static readonly CONFIG_VERSION_KEEP_COUNT = 20;
+  /** شکل *قبلی* config را (قبل از رونویسی) snapshot می‌کند و نسخه‌های
+   * قدیمی‌تر از ۲۰ تای آخر همین پل را پاک می‌کند (fire-and-forget). */
+  public static async recordConfigVersion(connectionId: string, config: TelegramConnectionConfig): Promise<void> {
+    await prisma.connectionConfigVersion.create({
+      data: { connectionId, config: config as unknown as Prisma.InputJsonValue },
+    });
+    const old = await prisma.connectionConfigVersion.findMany({
+      where: { connectionId },
+      orderBy: { createdAt: 'desc' },
+      skip: Storage.CONFIG_VERSION_KEEP_COUNT,
+      select: { id: true },
+    });
+    if (old.length > 0) {
+      prisma.connectionConfigVersion
+        .deleteMany({ where: { id: { in: old.map((o) => o.id) } } })
+        .catch((e) => logger.error({ err: e }, 'Failed to trim old config versions'));
+    }
+  }
+  public static async getConfigVersions(connectionId: string, limit = 20): Promise<{ id: string; createdAt: string }[]> {
+    const rows = await prisma.connectionConfigVersion.findMany({
+      where: { connectionId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: { id: true, createdAt: true },
+    });
+    return rows.map((r) => ({ id: r.id, createdAt: r.createdAt.toISOString() }));
+  }
+  public static async getConfigVersion(connectionId: string, versionId: string): Promise<TelegramConnectionConfig | null> {
+    const row = await prisma.connectionConfigVersion.findFirst({ where: { id: versionId, connectionId } });
+    if (!row) return null;
+    return row.config as unknown as TelegramConnectionConfig;
   }
   /** فقط برای تست‌ها: اتصال Prisma را می‌بندد تا فرآیند تست بدون
    * handle باز خاتمه یابد. */
