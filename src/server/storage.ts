@@ -33,6 +33,7 @@ function connectionFromRow(row: {
   consecutiveErrors: number;
   pollIntervalMs: number;
   lastErrorAlertAt: Date | null;
+  circuitOpenUntil: Date | null;
   config: Prisma.JsonValue;
 }): TelegramConnection {
   return {
@@ -50,6 +51,7 @@ function connectionFromRow(row: {
     consecutiveErrors: row.consecutiveErrors,
     pollIntervalMs: row.pollIntervalMs,
     lastErrorAlertAt: row.lastErrorAlertAt ? row.lastErrorAlertAt.toISOString() : null,
+    circuitOpenUntil: row.circuitOpenUntil ? row.circuitOpenUntil.toISOString() : null,
     config: row.config as unknown as TelegramConnection['config'],
   };
 }
@@ -70,6 +72,7 @@ function connectionToRow(conn: TelegramConnection) {
     consecutiveErrors: conn.consecutiveErrors || 0,
     pollIntervalMs: conn.pollIntervalMs,
     lastErrorAlertAt: conn.lastErrorAlertAt ? new Date(conn.lastErrorAlertAt) : null,
+    circuitOpenUntil: conn.circuitOpenUntil ? new Date(conn.circuitOpenUntil) : null,
     config: conn.config as unknown as Prisma.InputJsonValue,
   };
 }

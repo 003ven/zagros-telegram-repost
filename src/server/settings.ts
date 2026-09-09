@@ -126,6 +126,22 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     appliesTo: 'node',
     envVar: 'ALERT_COOLDOWN_MINUTES',
   },
+  {
+    key: 'CIRCUIT_BREAKER_THRESHOLD',
+    label: 'آستانه‌ی مدار باز',
+    description: 'فاز ۸: بعد از چند خطای متوالی روی یک پل، تا مدتی دیگر اصلاً تلاش برای ارسال پست‌های آن پل نمی‌شود (برای جلوگیری از هدررفت منابع روی پلی که کاملاً خراب است). باید بزرگ‌تر از آستانه‌ی هشدار باشد. پیش‌فرض اگر خالی: ۱۰.',
+    sensitive: false,
+    appliesTo: 'node',
+    envVar: 'CIRCUIT_BREAKER_THRESHOLD',
+  },
+  {
+    key: 'CIRCUIT_BREAKER_COOLDOWN_MINUTES',
+    label: 'مدت باز ماندن مدار (دقیقه)',
+    description: 'فاز ۸: بعد از باز شدن مدار یک پل، چند دقیقه صبر شود قبل از تلاش بعدی. برای حالت poll، پست‌های ازدست‌رفته‌ی این بازه بعداً خودکار گرفته می‌شوند؛ برای حالت push (زنده)، از دست می‌روند. پیش‌فرض اگر خالی: ۱۵.',
+    sensitive: false,
+    appliesTo: 'node',
+    envVar: 'CIRCUIT_BREAKER_COOLDOWN_MINUTES',
+  },
 ];
 
 const USERBOT_ECOSYSTEM_PATH = path.join(process.cwd(), 'userbot', 'ecosystem.userbot.config.cjs');

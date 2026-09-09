@@ -1559,6 +1559,21 @@ export class TelegramService {
    * conn.lastErrorAlertAt را در حافظه ست می‌کند؛ persist شدنش به عهده‌ی
    * saveConnection ای است که صدازننده‌ی این تابع خودش بعداً انجام می‌دهد.
    */
+  /**
+   * فاز ۸: وقتی consecutiveErrors از آستانه‌ی مدار باز رد شود، پل موقتاً
+   * «مدار باز» می‌شود — processSinglePost تا پایان cooldown هیچ پستی برای
+   * این پل امتحان نمی‌کند. بعد از cooldown، یک تلاش «نیمه‌باز» انجام
+   * می‌شود؛ موفقیت یعنی بسته‌شدن خودکار مدار (چون موفقیت consecutiveErrors
+   * را صفر می‌کند)، شکست یعنی این متد دوباره صدا زده می‌شود و مدار را با
+   * یک cooldown تازه دوباره باز می‌کند.
+   */
+  private static maybeOpenCircuitBreaker(conn: TelegramConnection): void {
+    const threshold = parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD || '10', 10) || 10;
+    const cooldownMinutes = parseInt(process.env.CIRCUIT_BREAKER_COOLDOWN_MINUTES || '15', 10) || 15;
+    const count = conn.consecutiveErrors || 0;
+    if (count < threshold) return;
+    conn.circuitOpenUntil = new Date(Date.now() + cooldownMinutes * 60 * 1000).toISOString();
+  }
   private static async maybeSendErrorAlert(conn: TelegramConnection): Promise<void> {
     const alertBotToken = process.env.ALERT_BOT_TOKEN;
     const alertChatId = process.env.ALERT_CHAT_ID;
@@ -1729,6 +1744,15 @@ export class TelegramService {
     post: TelegramMessage
   ): Promise<'sent' | 'filtered' | 'failed'> {
     const connId = conn.id;
+    if (conn.circuitOpenUntil && new Date(conn.circuitOpenUntil) > new Date()) {
+      await Storage.addLog(
+        connId,
+        'info',
+        `پل به‌خاطر خطاهای متوالی موقتاً غیرفعال است (مدار باز) — پست کد ${post.id} امتحان نشد`,
+        `مدار تا ${conn.circuitOpenUntil} باز می‌ماند`
+      );
+      return 'filtered';
+    }
     const processResult = await TelegramService.processAndFilterPost(conn, post);
 
     if (!processResult.shouldSend) {
@@ -1817,6 +1841,7 @@ export class TelegramService {
       conn.lastError = sendResult.error || 'خطا در ارسال پست به مقصد';
       conn.updatedAt = new Date().toISOString();
       await TelegramService.maybeSendErrorAlert(conn);
+      TelegramService.maybeOpenCircuitBreaker(conn);
 
       // ⚠️ رفع باگ واقعی مشاهده‌شده در production (زاگرس، ۱۷ مرداد ۱۴۰۴):
       // قبل از این رفع، وقتی یک پست به‌طور دائمی قابل ارسال نبود (مثلاً
@@ -1991,6 +2016,7 @@ export class TelegramService {
       conn.lastError = errMsg;
       conn.updatedAt = new Date().toISOString();
       await TelegramService.maybeSendErrorAlert(conn);
+      TelegramService.maybeOpenCircuitBreaker(conn);
       await Storage.saveConnection(conn);
 
       await Storage.addLog(

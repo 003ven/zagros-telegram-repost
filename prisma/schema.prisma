@@ -32,6 +32,7 @@ model Connection {
   consecutiveErrors Int    @default(0)
   pollIntervalMs  Int      @default(15000)
   lastErrorAlertAt DateTime?  // فاز ۷: آخرین‌بار هشدار خطای متوالی فرستاده شد (برای cooldown per-پل)
+  circuitOpenUntil DateTime?  // فاز ۸: اگر ست شده و در آینده باشد، پل موقتاً «مدار باز» است و پست جدید امتحان نمی‌شود
   // شکل کامل TelegramConnectionConfig (src/schemas.ts) به‌صورت JSON —
   // چون این شمای زودتغییر است (فیلد جدید هر بار طبق
   // references/extension-recipes.md اضافه می‌شود)، ستون‌بندی جدا برای

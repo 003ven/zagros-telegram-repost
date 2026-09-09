@@ -21,6 +21,7 @@ export interface TelegramConnection {
   lastError: string | null;
   consecutiveErrors?: number;
   lastErrorAlertAt?: string | null;
+  circuitOpenUntil?: string | null;
   pollIntervalMs: number;
   config: TelegramConnectionConfig;
 }
