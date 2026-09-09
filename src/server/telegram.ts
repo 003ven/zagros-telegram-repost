@@ -1,5 +1,5 @@
 import { classifyAndFormat } from './contentClassifier';
-import { splitForTelegram, wrapConfigLinks } from './textSplit';
+import { wrapConfigLinks } from './textSplit';
 import { enqueueForTarget } from './targetQueue';
 import {
   TelegramConnection,
@@ -1762,9 +1762,6 @@ export class TelegramService {
       }
     }
 
-    const hasMedia = post.mediaType !== 'text' && !!(post.mediaUrls && post.mediaUrls.length > 0);
-    const split = splitForTelegram(processResult.processedText || '', processResult.processedHtml, hasMedia);
-
     const postToSend: TelegramMessage = {
       ...post,
       inlineKeyboard: processResult.processedInlineKeyboard,
@@ -1772,14 +1769,11 @@ export class TelegramService {
     const sendResult = await TelegramService.forwardMessageToTarget(
       conn,
       postToSend,
-      split.main.text,
-      split.main.html
+      processResult.processedText,
+      processResult.processedHtml
     );
 
     if (sendResult.success) {
-      if (split.overflow.length > 0) {
-        await TelegramService.sendOverflowChunks(conn.botToken.trim(), conn.targetChannel.trim(), split.overflow);
-      }
       conn.lastMessageId = Math.max(conn.lastMessageId || 0, post.id);
       conn.transferredCount += 1;
       conn.lastReceivedAt = new Date().toISOString();
