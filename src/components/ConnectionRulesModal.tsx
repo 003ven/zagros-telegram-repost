@@ -1,5 +1,5 @@
 import { Tags } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TelegramConnection, ReplaceRule, TelegramConnectionConfig, TelegramMessage } from '../types';
 import { getDefaultConnectionConfig } from '../lib/defaultConnectionConfig';
 import { apiFetch } from '../lib/api';
@@ -27,6 +27,7 @@ import {
   Bookmark,
   Save,
   Download,
+  Upload,
   Copy,
   MousePointerClick,
 } from 'lucide-react';
@@ -440,6 +441,91 @@ export const ConnectionRulesModal: React.FC<Props> = ({
     setPresetNotification(`تنظیمات پریست "${preset.name}" با موفقیت جایگذاری شد.`);
     setTimeout(() => setPresetNotification(null), 4000);
   };
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  /** فاز ۱۰: دانلود خروجی تنظیمات این پل (فقط category+config، بدون
+   * botToken/کانال — برای اشتراک‌گذاری قوانین بین پل‌ها). */
+  const handleExportConfig = async () => {
+    if (!connection) return;
+    try {
+      const res = await apiFetch(`/api/connections/${connection.id}/export-config`);
+      const data = await res.json();
+      if (!data.success) {
+        setPresetNotification('خطا در خروجی‌گیری تنظیمات.');
+        setTimeout(() => setPresetNotification(null), 4000);
+        return;
+      }
+      const jsonString = JSON.stringify(data.export, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safeSource = connection.sourceChannel.replace(/[^a-zA-Z0-9_]/g, '');
+      a.href = url;
+      a.download = `zagros_bridge_config_${safeSource}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setPresetNotification('خطا در خروجی‌گیری تنظیمات.');
+      setTimeout(() => setPresetNotification(null), 4000);
+    }
+  };
+  /** همان الگوی handleApplyPreset، به‌اضافه‌ی allowedReactions/seedReaction
+   * (که در پریست‌ها هنوز پوشش داده نشده‌اند). فقط state محلی را پر می‌کند؛
+   * ذخیره‌ی واقعی همچنان با دکمه‌ی Save همین مودال انجام می‌شود. */
+  const applyImportedConfig = (cfg: Partial<TelegramConnectionConfig>) => {
+    if (cfg.replaceRules) setReplaceRules(cfg.replaceRules);
+    if (cfg.removeLinks !== undefined) setRemoveLinks(cfg.removeLinks);
+    if (cfg.removeMentions !== undefined) setRemoveMentions(cfg.removeMentions);
+    if (cfg.removeInlineButtons !== undefined) setRemoveInlineButtons(cfg.removeInlineButtons);
+    if (cfg.linkReplaceRules) setLinkReplaceRules(cfg.linkReplaceRules);
+    if (cfg.buttonReplaceRules) setButtonReplaceRules(cfg.buttonReplaceRules);
+    if (cfg.skipDuplicateContent !== undefined) setSkipDuplicateContent(cfg.skipDuplicateContent);
+    if (cfg.webhookUrl !== undefined) setWebhookUrl(cfg.webhookUrl);
+    if (cfg.allowedReactions) setAllowedReactionsInput(cfg.allowedReactions.join(', '));
+    if (cfg.seedReaction?.enabled !== undefined) setSeedReactionEnabled(cfg.seedReaction.enabled);
+    if (cfg.seedReaction?.selectionMode) setSeedReactionRandom(cfg.seedReaction.selectionMode === 'random');
+    if (cfg.customHeader !== undefined) setCustomHeader(cfg.customHeader);
+    if (cfg.customFooter !== undefined) setCustomFooter(cfg.customFooter);
+    if (cfg.keywordsInclude) setKeywordsIncludeInput(cfg.keywordsInclude.join(', '));
+    if (cfg.keywordsExclude) setKeywordsExcludeInput(cfg.keywordsExclude.join(', '));
+    if (cfg.allowedMediaTypes) setAllowedMediaTypes(cfg.allowedMediaTypes);
+    if (cfg.delaySeconds !== undefined) setDelaySeconds(cfg.delaySeconds);
+    if (cfg.activeScheduleEnabled !== undefined) setActiveScheduleEnabled(cfg.activeScheduleEnabled);
+    if (cfg.activeScheduleStart) setActiveScheduleStart(cfg.activeScheduleStart);
+    if (cfg.activeScheduleEnd) setActiveScheduleEnd(cfg.activeScheduleEnd);
+    if (cfg.activeDays) setActiveDays(cfg.activeDays);
+    if (cfg.aiRewrite !== undefined) setAiRewrite(cfg.aiRewrite);
+    if (cfg.aiTranslate) setAiTranslate(cfg.aiTranslate);
+    if (cfg.contentClassifier?.enabled !== undefined) setContentClassifierEnabled(cfg.contentClassifier.enabled);
+    if (cfg.contentClassifier?.hashtagAlwaysAdd) setHashtagAlwaysAdd(cfg.contentClassifier.hashtagAlwaysAdd);
+    if (cfg.contentClassifier?.hashtagKeywordMap) setHashtagKeywordMap(cfg.contentClassifier.hashtagKeywordMap);
+    setPresetNotification('تنظیمات از فایل با موفقیت جایگذاری شد — برای ذخیره‌ی نهایی، دکمه‌ی Save را بزنید.');
+    setTimeout(() => setPresetNotification(null), 6000);
+  };
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const parsed = JSON.parse(content);
+        const cfg = parsed?.config ?? parsed?.export?.config ?? parsed;
+        if (!cfg || typeof cfg !== 'object') {
+          setPresetNotification('فرمت فایل تنظیمات نامعتبر است.');
+          setTimeout(() => setPresetNotification(null), 4000);
+          return;
+        }
+        applyImportedConfig(cfg as Partial<TelegramConnectionConfig>);
+      } catch {
+        setPresetNotification('خواندن فایل تنظیمات ناموفق بود.');
+        setTimeout(() => setPresetNotification(null), 4000);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   const handleSavePreset = () => {
     if (!newPresetName.trim()) return;
@@ -703,6 +789,31 @@ export const ConnectionRulesModal: React.FC<Props> = ({
                 ذخیره تنظیمات فعلی به‌عنوان پریست جدید
               </button>
             )}
+            <button
+              type="button"
+              onClick={handleExportConfig}
+              title="دانلود تنظیمات این پل به‌صورت فایل JSON"
+              className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/15 text-white/70 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              خروجی
+            </button>
+            <button
+              type="button"
+              onClick={() => importFileInputRef.current?.click()}
+              title="وارد کردن تنظیمات از یک فایل JSON خروجی‌گرفته‌شده"
+              className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/15 text-white/70 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              ورودی
+            </button>
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept="application/json"
+              onChange={handleImportFileChange}
+              className="hidden"
+            />
           </div>
         </div>
 
