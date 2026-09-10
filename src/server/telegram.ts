@@ -1804,6 +1804,7 @@ export class TelegramService {
       conn.status = 'active';
       conn.lastError = null;
       conn.consecutiveErrors = 0;
+      conn.circuitOpenUntil = null;
       conn.updatedAt = new Date().toISOString();
       await Storage.saveConnection(conn);
 
