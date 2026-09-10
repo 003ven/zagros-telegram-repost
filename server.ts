@@ -380,6 +380,63 @@ export async function createApp(opts: { mountFrontend?: boolean } = {}) {
     }
   });
 
+  // فاز ۱۰: خروجی‌گیری تک‌به‌تک تنظیمات یک پل — عمداً بدون botToken/کانال
+  // (برای اشتراک‌گذاری «قوانین» بین پل‌ها، نه کلون کامل با سکرت).
+  app.get('/api/connections/:id/export-config', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const conn = await Storage.getConnection(id);
+      if (!conn) {
+        return res.status(404).json({ success: false, error: 'اتصال یافت نشد' });
+      }
+      return res.json({
+        success: true,
+        export: {
+          exportedAt: new Date().toISOString(),
+          sourceLabel: `${conn.sourceChannel} -> ${conn.targetChannel}`,
+          category: conn.config.category,
+          config: conn.config,
+        },
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'خطا در خروجی‌گیری تنظیمات' });
+    }
+  });
+  // فاز ۱۰: وارد کردن تنظیمات از یک فایل خروجی‌گرفته‌شده (یا شکل کامل
+  // export یا خودِ config را می‌پذیرد) روی یک پل موجود — از همان منطق
+  // اعتبارسنجی/merge/نسخه‌بندی روت PUT /config استفاده می‌کند.
+  app.post('/api/connections/:id/import-config', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const conn = await Storage.getConnection(id);
+      if (!conn) {
+        return res.status(404).json({ success: false, error: 'اتصال یافت نشد' });
+      }
+      const incoming = req.body?.config ?? req.body?.export?.config ?? req.body;
+      const partialResult = TelegramConnectionConfigSchema.partial().safeParse(incoming || {});
+      if (!partialResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: partialResult.error.issues[0]?.message || 'فایل تنظیمات نامعتبر است',
+        });
+      }
+      await Storage.recordConfigVersion(id, conn.config).catch((e) =>
+        logger.warn({ err: e, connId: id }, 'ثبت نسخه‌ی قبلی تنظیمات شکست خورد (بی‌خطر)')
+      );
+      conn.config = {
+        ...TelegramService.getDefaultConfig(),
+        ...(conn.config || {}),
+        ...partialResult.data,
+      };
+      conn.updatedAt = new Date().toISOString();
+      await Storage.saveConnection(conn);
+      await Storage.addLog(id, 'info', 'تنظیمات از یک فایل خروجی وارد شد');
+      return res.json({ success: true, connection: conn });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'خطا در وارد کردن تنظیمات' });
+    }
+  });
+
   // Test post send to target channel
   app.post('/api/connections/:id/test-send', async (req, res) => {
     try {
