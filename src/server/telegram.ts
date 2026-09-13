@@ -1,4 +1,3 @@
-import { classifyAndFormat } from './contentClassifier';
 import { wrapConfigLinks } from './textSplit';
 import { enqueueForTarget } from './targetQueue';
 import {
@@ -631,32 +630,6 @@ export class TelegramService {
     }
     if (processedHtml) {
       processedHtml = wrapConfigLinks(processedHtml);
-    }
-    // اگه تشخیص محتوا برای این پل فعاله، خروجیش (بازسازی فعال، نه فقط
-    // حفظ فرمت اصلی) جایگزین هرچی بالا محاسبه شد می‌شه.
-    // ⚠️ غیرفعال موقت (۸ شهریور ۱۴۰۵): این بلاک بدون قید و شرط هر HTML
-    // درستی که بالاتر از entity های اصلی پیام (لینک‌ها/فرمت‌بندی واقعی)
-    // ساخته شده بود رو با بازسازی خودش (که فقط از رو متن خام کار می‌کنه و
-    // هیچ‌جوره namknow لینک‌های entity-based نیست) جایگزین می‌کرد - نتیجه‌ش
-    // گم‌شدن کامل لینک‌های کلیک‌پذیر پست‌هایی مثل لیست پروکسی‌ها بود. تا
-    // وقتی این فیچر با منطق «فقط وقتی واقعاً چیزی برای بهتر کردن هست وارد
-    // عمل شو» بازطراحی نشه، غیرفعاله. (contentClassifier.ts دست‌نخورده
-    // می‌مونه، فقط اینجا صداش نمی‌زنیم.)
-    if (false && config.contentClassifier?.enabled) {
-      const escapeHtmlForHeader = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      let classified = classifyAndFormat(text, {
-        alwaysAdd: config.contentClassifier.hashtagAlwaysAdd,
-        keywordMap: (config.contentClassifier.hashtagKeywordMap || [])
-          .filter((r) => r && r.keyword && r.hashtag)
-          .map((r) => ({ keyword: r.keyword as string, hashtag: r.hashtag as string })),
-      });
-      if (config.customHeader && config.customHeader.trim()) {
-        classified = `${escapeHtmlForHeader(config.customHeader.trim())}\n\n${classified}`;
-      }
-      if (config.customFooter && config.customFooter.trim()) {
-        classified = `${classified}\n\n${escapeHtmlForHeader(config.customFooter.trim())}`;
-      }
-      processedHtml = classified;
     }
     // 9. Inline Buttons — حذف کامل یا جایگزینی لینک دکمه‌ها
     let processedInlineKeyboard: { text: string; url: string }[][] | undefined = message.inlineKeyboard;

@@ -182,14 +182,14 @@ export const ConnectionRulesModal: React.FC<Props> = ({
   );
   const [customHeader, setCustomHeader] = useState(currentConfig.customHeader || '');
   const [contentClassifierEnabled, setContentClassifierEnabled] = useState(
-    currentConfig.contentClassifier?.enabled || false
+    currentConfig.contentClassifier?.hashtagInjection?.enabled || false
   );
   const [hashtagAlwaysAdd, setHashtagAlwaysAdd] = useState<string[]>(
-    currentConfig.contentClassifier?.hashtagAlwaysAdd || []
+    (currentConfig.contentClassifier?.hashtagInjection?.hashtagAlwaysAdd || []).map((h) => h.hashtag)
   );
   const [newHashtagAlwaysAdd, setNewHashtagAlwaysAdd] = useState('');
   const [hashtagKeywordMap, setHashtagKeywordMap] = useState<{ keyword: string; hashtag: string }[]>(
-    currentConfig.contentClassifier?.hashtagKeywordMap || []
+    (currentConfig.contentClassifier?.hashtagInjection?.hashtagKeywordMap || []).map((r) => ({ keyword: r.keyword, hashtag: r.hashtag }))
   );
   const [newHashtagKeyword, setNewHashtagKeyword] = useState('');
   const [newHashtagForKeyword, setNewHashtagForKeyword] = useState('');
@@ -434,9 +434,14 @@ export const ConnectionRulesModal: React.FC<Props> = ({
     if (cfg.activeDays) setActiveDays(cfg.activeDays);
     if (cfg.aiRewrite !== undefined) setAiRewrite(cfg.aiRewrite);
     if (cfg.aiTranslate) setAiTranslate(cfg.aiTranslate);
-    if (cfg.contentClassifier?.enabled !== undefined) setContentClassifierEnabled(cfg.contentClassifier.enabled);
-    if (cfg.contentClassifier?.hashtagAlwaysAdd) setHashtagAlwaysAdd(cfg.contentClassifier.hashtagAlwaysAdd);
-    if (cfg.contentClassifier?.hashtagKeywordMap) setHashtagKeywordMap(cfg.contentClassifier.hashtagKeywordMap);
+    if (cfg.contentClassifier?.hashtagInjection?.enabled !== undefined)
+      setContentClassifierEnabled(cfg.contentClassifier.hashtagInjection.enabled);
+    if (cfg.contentClassifier?.hashtagInjection?.hashtagAlwaysAdd)
+      setHashtagAlwaysAdd(cfg.contentClassifier.hashtagInjection.hashtagAlwaysAdd.map((h) => h.hashtag));
+    if (cfg.contentClassifier?.hashtagInjection?.hashtagKeywordMap)
+      setHashtagKeywordMap(
+        cfg.contentClassifier.hashtagInjection.hashtagKeywordMap.map((r) => ({ keyword: r.keyword, hashtag: r.hashtag }))
+      );
 
     setPresetNotification(`تنظیمات پریست "${preset.name}" با موفقیت جایگذاری شد.`);
     setTimeout(() => setPresetNotification(null), 4000);
@@ -497,9 +502,14 @@ export const ConnectionRulesModal: React.FC<Props> = ({
     if (cfg.activeDays) setActiveDays(cfg.activeDays);
     if (cfg.aiRewrite !== undefined) setAiRewrite(cfg.aiRewrite);
     if (cfg.aiTranslate) setAiTranslate(cfg.aiTranslate);
-    if (cfg.contentClassifier?.enabled !== undefined) setContentClassifierEnabled(cfg.contentClassifier.enabled);
-    if (cfg.contentClassifier?.hashtagAlwaysAdd) setHashtagAlwaysAdd(cfg.contentClassifier.hashtagAlwaysAdd);
-    if (cfg.contentClassifier?.hashtagKeywordMap) setHashtagKeywordMap(cfg.contentClassifier.hashtagKeywordMap);
+    if (cfg.contentClassifier?.hashtagInjection?.enabled !== undefined)
+      setContentClassifierEnabled(cfg.contentClassifier.hashtagInjection.enabled);
+    if (cfg.contentClassifier?.hashtagInjection?.hashtagAlwaysAdd)
+      setHashtagAlwaysAdd(cfg.contentClassifier.hashtagInjection.hashtagAlwaysAdd.map((h) => h.hashtag));
+    if (cfg.contentClassifier?.hashtagInjection?.hashtagKeywordMap)
+      setHashtagKeywordMap(
+        cfg.contentClassifier.hashtagInjection.hashtagKeywordMap.map((r) => ({ keyword: r.keyword, hashtag: r.hashtag }))
+      );
     setPresetNotification('تنظیمات از فایل با موفقیت جایگذاری شد — برای ذخیره‌ی نهایی، دکمه‌ی Save را بزنید.');
     setTimeout(() => setPresetNotification(null), 6000);
   };
@@ -565,9 +575,11 @@ export const ConnectionRulesModal: React.FC<Props> = ({
         aiRewrite,
         aiTranslate,
         contentClassifier: {
-          enabled: contentClassifierEnabled,
-          hashtagAlwaysAdd,
-          hashtagKeywordMap,
+          hashtagInjection: {
+            enabled: contentClassifierEnabled,
+            hashtagAlwaysAdd: hashtagAlwaysAdd.map((h) => ({ hashtag: h, type: 'global' as const })),
+            hashtagKeywordMap: hashtagKeywordMap.map((r) => ({ ...r, type: 'global' as const })),
+          },
         },
       },
     };
@@ -644,9 +656,11 @@ export const ConnectionRulesModal: React.FC<Props> = ({
       aiRewrite,
       aiTranslate,
       contentClassifier: {
-        enabled: contentClassifierEnabled,
-        hashtagAlwaysAdd,
-        hashtagKeywordMap,
+        hashtagInjection: {
+          enabled: contentClassifierEnabled,
+          hashtagAlwaysAdd: hashtagAlwaysAdd.map((h) => ({ hashtag: h, type: 'global' as const })),
+          hashtagKeywordMap: hashtagKeywordMap.map((r) => ({ ...r, type: 'global' as const })),
+        },
       },
     };
 

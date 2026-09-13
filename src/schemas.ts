@@ -109,25 +109,112 @@ export const TelegramConnectionConfigSchema = z.object({
       isBig: z.boolean().default(false),
     })
     .default(() => ({ enabled: false, emojiPool: [], selectionMode: 'fixed' as const, isBig: false })),
-  // تشخیص خودکار نوع محتوا (کانفیگ/پروکسی، هشتگ، لینک) و قالب‌بندی
-  // حرفه‌ای با HTML. وقتی enabled=true باشد، حتی اگر پل هیچ تغییر دیگری
-  // نداشته باشد، پست دیگر از مسیر سریع copyMessage رد نمی‌شود - چون آن
-  // مسیر پیام مبدأ را دست‌نخورده کپی می‌کند و این کلاسیفایر اصلاً فرصت
-  // اجرا پیدا نمی‌کند.
-  contentClassifier: z
-    .object({
-      enabled: z.boolean().default(false),
-      // هشتگ‌هایی که همیشه به پست این پل اضافه می‌شوند (مثلاً برند
-      // خودِ کانال)، صرف‌نظر از محتوای پست.
-      hashtagAlwaysAdd: z.array(z.string()).default(() => []),
-      // اگر هرکدام از این کلمات کلیدی در متن پست پیدا شود، هشتگ متناظرش
-      // اضافه می‌شود (اگر از قبل نبود). تشخیص کلمه با پشتیبانی کامل از
-      // فارسی/عربی انجام می‌شود، نه فقط انگلیسی.
-      hashtagKeywordMap: z
-        .array(z.object({ keyword: z.string(), hashtag: z.string() }))
-        .default(() => []),
+  // منطق واقعیِ این بخش دیگر در contentClassifier.ts نیست - آن فایل
+  // بازنشسته و حذف شده (تاریخچه‌اش در گیت محفوظ است). هر ۵ زیربخش زیر
+  // مستقل از هم، با سوییچ enabled خودشان، در src/server/textSplit.ts
+  // پیاده می‌شوند و روی htmlText واقعی (نه متن خام) کار می‌کنند تا
+  // entityهای اصلی پیام (لینک/فرمت‌بندی) گم نشوند.
+  contentClassifier: z.preprocess(
+    // سازگاری با گذشته: شکل قدیمی enabled/hashtagAlwaysAdd/hashtagKeywordMap
+    // مستقیم زیر contentClassifier بود (بدون hashtagInjection میانی) و
+    // hashtagAlwaysAdd رشته‌ی خام بود. اگر ورودی این شکل قدیمی را داشت،
+    // قبل از ولیدیشن به شکل جدید کوچ داده می‌شود.
+    (val) => {
+      if (val && typeof val === 'object' && !('hashtagInjection' in val)) {
+        const v = val as Record<string, unknown>;
+        if ('hashtagAlwaysAdd' in v || 'hashtagKeywordMap' in v || 'enabled' in v) {
+          const { enabled, hashtagAlwaysAdd, hashtagKeywordMap, ...rest } = v;
+          return { ...rest, hashtagInjection: { enabled, hashtagAlwaysAdd, hashtagKeywordMap } };
+        }
+      }
+      return val;
+    },
+    z.object({
+      // هشتگ‌هایی که همیشه/بر اساس کلمه‌کلیدی به پست اضافه می‌شوند. هرکدام
+      // «عمومی» (#تگ - سرچ سراسری تلگرام) یا «داخلی» (#تگ@یوزرنیم_مقصد -
+      // فقط سرچ همان کانال) است؛ اگر داخلی باشد ولی کانال مقصد یوزرنیم
+      // عمومی نداشته باشد، خودکار به عمومی برمی‌گردد.
+      hashtagInjection: z
+        .object({
+          enabled: z.boolean().default(false),
+          hashtagAlwaysAdd: z
+            .array(
+              z.preprocess(
+                (v) => (typeof v === 'string' ? { hashtag: v, type: 'global' as const } : v),
+                z.object({ hashtag: z.string(), type: z.enum(['global', 'local']).default('global') })
+              )
+            )
+            .default(() => []),
+          hashtagKeywordMap: z
+            .array(
+              z.object({
+                keyword: z.string(),
+                hashtag: z.string(),
+                type: z.enum(['global', 'local']).default('global'),
+              })
+            )
+            .default(() => []),
+        })
+        .default(() => ({ enabled: false, hashtagAlwaysAdd: [], hashtagKeywordMap: [] })),
+      // پروکسی‌های تلگرام خام/پشت‌برچسب‌ساده در متن پست، به گرید پرچم+PROXY
+      // تبدیل می‌شوند. پرچم‌ها تزئینی‌اند (نه geolocation)، چرخشی انتخاب
+      // می‌شوند. لینک‌های از قبل پرچم‌دار یا داخل دکمه، دست‌نخورده می‌مانند.
+      proxyGrid: z
+        .object({
+          enabled: z.boolean().default(false),
+          flagPalette: z.array(z.string()).default(() => ['🇩🇪', '🇳🇱', '🇫🇮', '🇫🇷', '🇬🇧', '🇺🇸', '🇨🇦', '🇸🇪', '🇳🇴', '🇩🇰', '🇨🇭', '🇦🇹', '🇧🇪', '🇮🇪', '🇵🇱', '🇹🇷', '🇷🇺', '🇺🇦', '🇱🇻', '🇱🇹', '🇪🇪', '🇷🇴', '🇪🇸', '🇮🇹', '🇯🇵', '🇸🇬', '🇰🇷', '🇦🇺', '⚪']),
+          columnsPerRow: z.number().min(1).max(10).default(4),
+        })
+        .default(() => ({
+          enabled: false,
+          flagPalette: ['🇩🇪', '🇳🇱', '🇫🇮', '🇫🇷', '🇬🇧', '🇺🇸', '🇨🇦', '🇸🇪', '🇳🇴', '🇩🇰', '🇨🇭', '🇦🇹', '🇧🇪', '🇮🇪', '🇵🇱', '🇹🇷', '🇷🇺', '🇺🇦', '🇱🇻', '🇱🇹', '🇪🇪', '🇷🇴', '🇪🇸', '🇮🇹', '🇯🇵', '🇸🇬', '🇰🇷', '🇦🇺', '⚪'],
+          columnsPerRow: 4,
+        })),
+      // برچسب/ریبرند کانفیگ‌های ایکس‌ری (vless/vmess/trojan/...). ریمارک
+      // اصلی (fragment یا فیلد ps) با برند خودِ ادمین جایگزین می‌شود، هم
+      // رو هدر هم داخل خودِ کانفیگ. خودِ کانفیگ همیشه در <pre> مستقل با
+      // کپی تضمینی می‌نشیند (code/pre با blockquote قابل‌ترکیب نیست)؛
+      // فقط استایل برچسب (بولد/blockquote) انتخابی است.
+      xrayConfigLabel: z
+        .object({
+          enabled: z.boolean().default(false),
+          brandName: z.string().default(''),
+          labelStyle: z.enum(['bold', 'blockquote']).default('bold'),
+          mergeConsecutive: z.boolean().default(false),
+          fallbackLabel: z.string().default('کانفیگ'),
+        })
+        .default(() => ({
+          enabled: false,
+          brandName: '',
+          labelStyle: 'bold' as const,
+          mergeConsecutive: false,
+          fallbackLabel: 'کانفیگ',
+        })),
+      // متن‌های بلند به پاراگراف (با خط خالی) شکسته می‌شوند؛ پاراگراف بالای
+      // آستانه quote می‌شود، زیر آستانه (تیتر/انتقالی) بولد می‌شود. مستقل
+      // از وجود کانفیگ/لینک در پست.
+      paragraphFormatting: z
+        .object({
+          enabled: z.boolean().default(false),
+          paragraphThreshold: z.number().min(1).default(150),
+        })
+        .default(() => ({ enabled: false, paragraphThreshold: 150 })),
+      // لینک‌های «ساب» (فایل متنی حاوی چند کانفیگ) با کلیدواژه از رو URL
+      // تشخیص داده می‌شوند و هرکدام در <pre> مستقل خودشان (کپی تضمینی)
+      // قرار می‌گیرند. لیست کلیدواژه ذاتاً کامل نیست.
+      subLinkFormatting: z
+        .object({
+          enabled: z.boolean().default(false),
+          keywordList: z
+            .array(z.string())
+            .default(() => ['sub', 'subscribe', 'config', 'v2ray', 'vless', 'vmess', 'trojan', 'vpn', 'clash', 'hysteria', 'fragment']),
+        })
+        .default(() => ({
+          enabled: false,
+          keywordList: ['sub', 'subscribe', 'config', 'v2ray', 'vless', 'vmess', 'trojan', 'vpn', 'clash', 'hysteria', 'fragment'],
+        })),
     })
-    .default(() => ({ enabled: false, hashtagAlwaysAdd: [], hashtagKeywordMap: [] })),
+  ),
 });
 
 export const ConnectionCreateInputSchema = z.object({
