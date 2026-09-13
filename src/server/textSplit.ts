@@ -114,3 +114,131 @@ export function wrapConfigLinks(html: string): string {
     })
     .join('');
 }
+
+// ==================== جدید: گرید پرچم پروکسی ====================
+
+const TGPROXY_HREF_PATTERN = /^(https?:\/\/t\.me\/proxy\?|tg:\/\/proxy\?)/i;
+const SEPARATOR_ONLY = /^[\s•\-–—*·.]*$/;
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+function extractHref(tagStr: string): string | null {
+  const m = tagStr.match(/href\s*=\s*"([^"]*)"/i);
+  return m ? decodeEntities(m[1]) : null;
+}
+
+interface ProxyLinkUnit {
+  tokenStart: number;
+  tokenEnd: number;
+  href: string;
+}
+
+export interface ProxyGridOptions {
+  flagPalette: string[];
+  columnsPerRow: number;
+}
+
+export function wrapProxyLinks(html: string, options: ProxyGridOptions): string {
+  const { flagPalette, columnsPerRow } = options;
+  if (!flagPalette.length || columnsPerRow < 1) return html;
+
+  const tokens = tokenizeHtml(html);
+
+  // پاس اول: پیدا کردن هر <a href=tgproxy>متن</a> که از قبل پرچم‌دار نیست
+  const units: ProxyLinkUnit[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.type !== 'tag') continue;
+    const openMatch = t.value.match(OPEN_TAG);
+    if (!openMatch || openMatch[1].toLowerCase() !== 'a') continue;
+    const href = extractHref(t.value);
+    if (!href || !TGPROXY_HREF_PATTERN.test(href)) continue;
+
+    const textTok = tokens[i + 1];
+    const closeTok = tokens[i + 2];
+    if (!textTok || textTok.type !== 'text') continue;
+    if (!closeTok || closeTok.type !== 'tag') continue;
+    const closeMatch = closeTok.value.match(CLOSE_TAG);
+    if (!closeMatch || closeMatch[1].toLowerCase() !== 'a') continue;
+
+    const alreadyFlagged = flagPalette.some((f) => textTok.value.trimStart().startsWith(f));
+    if (alreadyFlagged) continue;
+
+    units.push({ tokenStart: i, tokenEnd: i + 2, href });
+    i += 2;
+  }
+
+  if (units.length === 0) return html;
+
+  // پاس دوم: گروه‌بندی واحدهای پشت‌سرهم (فقط جداکننده‌ی ساده بینشون)
+  const groups: ProxyLinkUnit[][] = [];
+  let current: ProxyLinkUnit[] = [units[0]];
+  for (let k = 1; k < units.length; k++) {
+    const prev = units[k - 1];
+    const cur = units[k];
+    const between = tokens
+      .slice(prev.tokenEnd + 1, cur.tokenStart)
+      .map((tk) => tk.value)
+      .join('');
+    if (SEPARATOR_ONLY.test(between)) {
+      current.push(cur);
+    } else {
+      groups.push(current);
+      current = [cur];
+    }
+  }
+  groups.push(current);
+
+  // پاس سوم: رندر هر گروه و علامت‌گذاری تکن‌های جایگزین‌شونده/حذف‌شونده.
+  // شمارنده‌ی پرچم رو کل پست پیوسته‌ست (نه هر گروه از صفر) تا دو پروکسیِ
+  // جدا (که کنار هم نیستن، پس گروه نشدن) تصادفاً هم‌پرچم درنیان.
+  const replacement = new Map<number, string>();
+  const consumed = new Set<number>();
+  let flagCounter = 0;
+
+  for (const group of groups) {
+    const rows: string[] = [];
+    for (let r = 0; r < group.length; r += columnsPerRow) {
+      const rowItems = group.slice(r, r + columnsPerRow).map((unit) => {
+        const flag = flagPalette[flagCounter % flagPalette.length];
+        flagCounter++;
+        return `${flag} <a href="${escapeAttr(unit.href)}">PROXY</a>`;
+      });
+      rows.push(rowItems.join('    '));
+    }
+    const gridHtml = rows.join('\n');
+
+    const first = group[0];
+    const last = group[group.length - 1];
+    replacement.set(first.tokenStart, gridHtml);
+    for (let idx = first.tokenStart + 1; idx <= last.tokenEnd; idx++) {
+      consumed.add(idx);
+    }
+    // جداکننده‌ی خالص بلافاصله قبل از شروع گروه (مثلاً یه بولت تنها) رو هم
+    // حذف کن - وگرنه یه بولت یتیم قبل از گرید باقی می‌مونه.
+    const beforeIdx = first.tokenStart - 1;
+    const beforeTok = tokens[beforeIdx];
+    if (beforeTok && beforeTok.type === 'text' && SEPARATOR_ONLY.test(beforeTok.value) && beforeTok.value !== '') {
+      consumed.add(beforeIdx);
+    }
+  }
+
+  return tokens
+    .map((t, idx) => {
+      if (replacement.has(idx)) return replacement.get(idx)!;
+      if (consumed.has(idx)) return '';
+      return t.value;
+    })
+    .join('');
+}

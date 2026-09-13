@@ -1,4 +1,4 @@
-import { wrapConfigLinks } from './textSplit';
+import { wrapConfigLinks, wrapProxyLinks } from './textSplit';
 import { enqueueForTarget } from './targetQueue';
 import {
   TelegramConnection,
@@ -630,6 +630,12 @@ export class TelegramService {
     }
     if (processedHtml) {
       processedHtml = wrapConfigLinks(processedHtml);
+      if (config.contentClassifier?.proxyGrid?.enabled) {
+        processedHtml = wrapProxyLinks(processedHtml, {
+          flagPalette: config.contentClassifier.proxyGrid.flagPalette,
+          columnsPerRow: config.contentClassifier.proxyGrid.columnsPerRow,
+        });
+      }
     }
     // 9. Inline Buttons — حذف کامل یا جایگزینی لینک دکمه‌ها
     let processedInlineKeyboard: { text: string; url: string }[][] | undefined = message.inlineKeyboard;
@@ -1090,7 +1096,8 @@ export class TelegramService {
       config.removeMentions ||
       (config.linkReplaceRules && config.linkReplaceRules.length > 0) ||
       config.aiRewrite ||
-      (config.aiTranslate && config.aiTranslate !== 'none');
+      (config.aiTranslate && config.aiTranslate !== 'none') ||
+      !!config.contentClassifier?.proxyGrid?.enabled;
 
     if (!hasModifications && message.mediaType !== 'media_group' && message.mediaType !== 'document_group') {
       // Try copyMessage (cheapest path — Telegram handles the media transfer
