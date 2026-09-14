@@ -1,4 +1,4 @@
-import { wrapConfigLinks, wrapProxyLinks, formatParagraphs } from './textSplit';
+import { wrapConfigLinks, wrapProxyLinks, formatParagraphs, wrapSubLinks } from './textSplit';
 import { enqueueForTarget } from './targetQueue';
 import {
   TelegramConnection,
@@ -636,6 +636,11 @@ export class TelegramService {
           columnsPerRow: config.contentClassifier.proxyGrid.columnsPerRow,
         });
       }
+      if (config.contentClassifier?.subLinkFormatting?.enabled) {
+        processedHtml = wrapSubLinks(processedHtml, {
+          keywordList: config.contentClassifier.subLinkFormatting.keywordList,
+        });
+      }
       if (config.contentClassifier?.paragraphFormatting?.enabled) {
         processedHtml = formatParagraphs(processedHtml, {
           paragraphThreshold: config.contentClassifier.paragraphFormatting.paragraphThreshold,
@@ -1103,7 +1108,8 @@ export class TelegramService {
       config.aiRewrite ||
       (config.aiTranslate && config.aiTranslate !== 'none') ||
       !!config.contentClassifier?.proxyGrid?.enabled ||
-      !!config.contentClassifier?.paragraphFormatting?.enabled;
+      !!config.contentClassifier?.paragraphFormatting?.enabled ||
+      !!config.contentClassifier?.subLinkFormatting?.enabled;
 
     if (!hasModifications && message.mediaType !== 'media_group' && message.mediaType !== 'document_group') {
       // Try copyMessage (cheapest path — Telegram handles the media transfer

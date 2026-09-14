@@ -133,6 +133,10 @@ function escapeAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function extractHref(tagStr: string): string | null {
   const m = tagStr.match(/href\s*=\s*"([^"]*)"/i);
   return m ? decodeEntities(m[1]) : null;
@@ -316,4 +320,56 @@ export function formatParagraphs(html: string, options: ParagraphFormattingOptio
       return `<b>${trimmed}</b>`;
     })
     .join('\n\n');
+}
+
+// ==================== جدید: تشخیص و بسته‌بندی لینک‌های ساب ====================
+
+export interface SubLinkOptions {
+  keywordList: string[];
+}
+
+export function wrapSubLinks(html: string, options: SubLinkOptions): string {
+  const { keywordList } = options;
+  if (!keywordList.length) return html;
+  const lowerKeywords = keywordList.map((k) => k.toLowerCase());
+
+  const tokens = tokenizeHtml(html);
+  const replacement = new Map<number, string>();
+  const consumed = new Set<number>();
+
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.type !== 'tag') continue;
+    const openMatch = t.value.match(OPEN_TAG);
+    if (!openMatch || openMatch[1].toLowerCase() !== 'a') continue;
+    const href = extractHref(t.value);
+    if (!href) continue;
+    // پروکسی تلگرام مال فیچر جداست، اینجا کاری باهاش نداریم
+    if (TGPROXY_HREF_PATTERN.test(href)) continue;
+
+    const textTok = tokens[i + 1];
+    const closeTok = tokens[i + 2];
+    if (!textTok || textTok.type !== 'text') continue;
+    if (!closeTok || closeTok.type !== 'tag') continue;
+    const closeMatch = closeTok.value.match(CLOSE_TAG);
+    if (!closeMatch || closeMatch[1].toLowerCase() !== 'a') continue;
+
+    const hrefLower = href.toLowerCase();
+    if (!lowerKeywords.some((kw) => hrefLower.includes(kw))) continue;
+
+    replacement.set(i, `<pre>${escapeHtml(href)}</pre>`);
+    consumed.add(i + 1);
+    consumed.add(i + 2);
+    i += 2;
+  }
+
+  if (replacement.size === 0) return html;
+
+  return tokens
+    .map((t, idx) => {
+      if (replacement.has(idx)) return replacement.get(idx)!;
+      if (consumed.has(idx)) return '';
+      return t.value;
+    })
+    .join('');
 }
