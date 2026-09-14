@@ -242,3 +242,78 @@ export function wrapProxyLinks(html: string, options: ProxyGridOptions): string 
     })
     .join('');
 }
+
+// ==================== جدید: پاراگراف‌بندی متن بلند ====================
+
+// شکستن به پاراگراف با خط‌خالی، با حفظ صحیح تگ‌های باز (اگه یه تگ وسط یه
+// پاراگراف باز بشه و تو همون پاراگراف هم بسته بشه مشکلی نیست؛ اگه به‌ندرت
+// از مرز پاراگراف رد بشه، مثل splitHtmlPreservingTags تگ‌های باز رو می‌بنده
+// و پاراگراف بعدی دوباره بازشون می‌کنه).
+function splitIntoParagraphs(html: string): string[] {
+  const tokens = tokenizeHtml(html);
+  const paragraphs: string[] = [];
+  let current = '';
+  const openStack: string[] = [];
+
+  const closers = () => openStack.slice().reverse().map((t) => `</${t}>`).join('');
+  const openers = () => openStack.map((t) => `<${t}>`).join('');
+
+  const flush = () => {
+    if (current.trim()) paragraphs.push(current + closers());
+    current = openers();
+  };
+
+  for (const token of tokens) {
+    if (token.type === 'tag') {
+      current += token.value;
+      const openMatch = token.value.match(OPEN_TAG);
+      const closeMatch = token.value.match(CLOSE_TAG);
+      if (openMatch) openStack.push(openMatch[1]);
+      else if (closeMatch) openStack.pop();
+    } else {
+      const parts = token.value.split(/\n{2,}/);
+      parts.forEach((part, idx) => {
+        if (idx > 0) flush();
+        current += part;
+      });
+    }
+  }
+  flush();
+  return paragraphs;
+}
+
+function plainTextLength(paragraphHtml: string): number {
+  return paragraphHtml.replace(/<[^>]+>/g, '').length;
+}
+
+const UNSAFE_TO_WRAP = /<(blockquote|code|pre)\b/i;
+const HAS_BOLD = /<b\b/i;
+
+export interface ParagraphFormattingOptions {
+  paragraphThreshold: number;
+}
+
+export function formatParagraphs(html: string, options: ParagraphFormattingOptions): string {
+  const { paragraphThreshold } = options;
+  const paragraphs = splitIntoParagraphs(html);
+  if (paragraphs.length === 0) return html;
+
+  return paragraphs
+    .map((p) => {
+      const trimmed = p.trim();
+      if (!trimmed) return p;
+      // امنیت: اگه از قبل quote/code/pre تو دلشه، دست نزن - وگرنه nesting
+      // ممنوعِ Bot API (blockquote/bold نمی‌تونن code/pre/blockquote رو
+      // دربر بگیرن) می‌سازیم.
+      if (UNSAFE_TO_WRAP.test(trimmed)) return p;
+      const len = plainTextLength(trimmed);
+      if (len === 0) return p;
+      if (len > paragraphThreshold) return `<blockquote>${trimmed}</blockquote>`;
+      // اگه از قبل بولد داره (مثلاً یه <b> که از مرز پاراگراف رد شده و
+      // دوباره باز شده)، دوباره نپیچش - وگرنه <b><b>...</b>...</b> تودرتو
+      // می‌سازه.
+      if (HAS_BOLD.test(trimmed)) return p;
+      return `<b>${trimmed}</b>`;
+    })
+    .join('\n\n');
+}
