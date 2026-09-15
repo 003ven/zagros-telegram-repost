@@ -1,4 +1,4 @@
-import { wrapConfigLinks, wrapProxyLinks, formatParagraphs, wrapSubLinks } from './textSplit';
+import { wrapConfigLinks, wrapProxyLinks, formatParagraphs, wrapSubLinks, labelAndWrapConfigs } from './textSplit';
 import { enqueueForTarget } from './targetQueue';
 import {
   TelegramConnection,
@@ -629,7 +629,16 @@ export class TelegramService {
       processedHtml = sanitized.trim();
     }
     if (processedHtml) {
-      processedHtml = wrapConfigLinks(processedHtml);
+      if (config.contentClassifier?.xrayConfigLabel?.enabled) {
+        processedHtml = labelAndWrapConfigs(processedHtml, {
+          brandName: config.contentClassifier.xrayConfigLabel.brandName,
+          labelStyle: config.contentClassifier.xrayConfigLabel.labelStyle,
+          mergeConsecutive: config.contentClassifier.xrayConfigLabel.mergeConsecutive,
+          fallbackLabel: config.contentClassifier.xrayConfigLabel.fallbackLabel,
+        });
+      } else {
+        processedHtml = wrapConfigLinks(processedHtml);
+      }
       if (config.contentClassifier?.proxyGrid?.enabled) {
         processedHtml = wrapProxyLinks(processedHtml, {
           flagPalette: config.contentClassifier.proxyGrid.flagPalette,
@@ -1109,7 +1118,8 @@ export class TelegramService {
       (config.aiTranslate && config.aiTranslate !== 'none') ||
       !!config.contentClassifier?.proxyGrid?.enabled ||
       !!config.contentClassifier?.paragraphFormatting?.enabled ||
-      !!config.contentClassifier?.subLinkFormatting?.enabled;
+      !!config.contentClassifier?.subLinkFormatting?.enabled ||
+      !!config.contentClassifier?.xrayConfigLabel?.enabled;
 
     if (!hasModifications && message.mediaType !== 'media_group' && message.mediaType !== 'document_group') {
       // Try copyMessage (cheapest path — Telegram handles the media transfer

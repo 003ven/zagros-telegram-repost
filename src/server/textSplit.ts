@@ -373,3 +373,194 @@ export function wrapSubLinks(html: string, options: SubLinkOptions): string {
     })
     .join('');
 }
+
+// ==================== جدید: برچسب/ریبرند کانفیگ ایکس‌ری ====================
+
+const FLAG_PREFIX = /^([\u{1F1E6}-\u{1F1FF}]{2})/u;
+
+// ریمارک خام رو به پرچم/تمایزدهنده می‌شکنه. برند قدیمی همیشه دور ریخته
+// می‌شه؛ فقط پرچم (اگه بود) و هرچی از اولین خط‌تیره به بعد حفظ می‌شن.
+function parseRawLabel(raw: string | null): { flag: string; differentiator: string } {
+  if (!raw || !raw.trim()) return { flag: '', differentiator: '' };
+  let rest = raw.trim();
+  let flag = '';
+  const flagMatch = rest.match(FLAG_PREFIX);
+  if (flagMatch) {
+    flag = flagMatch[1];
+    rest = rest.slice(flag.length);
+  }
+  const dashIdx = rest.indexOf('-');
+  const differentiator = dashIdx !== -1 ? rest.slice(dashIdx) : '';
+  return { flag, differentiator };
+}
+
+function computeFinalLabel(raw: string | null, brandName: string, fallbackLabel: string, autoNumber: number): string {
+  const { flag, differentiator } = parseRawLabel(raw);
+  const brand = brandName.trim() || fallbackLabel.trim() || 'کانفیگ';
+  const suffix = differentiator || `-${autoNumber}`;
+  return `${flag}${brand}${suffix}`;
+}
+
+// vless/trojan/ss/ssr/socks5/hysteria2: ریمارک همون #fragment انکودشده‌ست.
+function splitConfigFragment(configText: string): { withoutFragment: string; rawLabel: string | null } {
+  const hashIdx = configText.indexOf('#');
+  if (hashIdx === -1) return { withoutFragment: configText, rawLabel: null };
+  const withoutFragment = configText.slice(0, hashIdx);
+  const rawFragment = configText.slice(hashIdx + 1);
+  let decoded: string | null = null;
+  try {
+    decoded = decodeURIComponent(rawFragment);
+  } catch {
+    decoded = null;
+  }
+  return { withoutFragment, rawLabel: decoded && decoded.trim() ? decoded : null };
+}
+function buildConfigWithFragment(withoutFragment: string, newLabel: string): string {
+  return `${withoutFragment}#${encodeURIComponent(newLabel)}`;
+}
+
+// vmess: ریمارک تو فیلد ps داخل JSON بیس۶۴شده‌ست. هر خطای decode/parse یعنی
+// ok:false - تنها سیگنال برای اینکه این کانفیگ خاص کاملاً دست‌نخورده/بدون
+// برچسب رها بشه، نه نصفه‌خراب بشه.
+type VmessExtractResult = { ok: true; label: string | null; decoded: Record<string, unknown> } | { ok: false };
+function extractVmessLabel(configText: string): VmessExtractResult {
+  const b64 = configText.slice('vmess://'.length);
+  try {
+    const jsonStr = Buffer.from(b64, 'base64').toString('utf-8');
+    const decoded = JSON.parse(jsonStr);
+    if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) return { ok: false };
+    const ps = (decoded as Record<string, unknown>).ps;
+    const label = typeof ps === 'string' && ps.trim() ? ps : null;
+    return { ok: true, label, decoded: decoded as Record<string, unknown> };
+  } catch {
+    return { ok: false };
+  }
+}
+function buildVmessWithLabel(decoded: Record<string, unknown>, newLabel: string): string {
+  const updated = { ...decoded, ps: newLabel };
+  return 'vmess://' + Buffer.from(JSON.stringify(updated), 'utf-8').toString('base64');
+}
+
+interface ConfigMatch {
+  start: number;
+  end: number;
+  text: string;
+  protocol: string;
+}
+
+// همون منطق عمق‌ردیابیِ wrapConfigLinks (بیرون از a/code/pre)، ولی به‌جای
+// جایگزینی فوری، موقعیت مطلق هر match رو برمی‌گردونه - چون برای گروه‌بندی
+// و ساخت هدر/pre جدا لازمه چند match رو با هم ببینیم.
+function findSafeConfigMatches(html: string): ConfigMatch[] {
+  const tokens = tokenizeHtml(html);
+  let depth = 0;
+  let offset = 0;
+  const safeRanges: [number, number][] = [];
+  for (const token of tokens) {
+    const start = offset;
+    const end = offset + token.value.length;
+    if (token.type === 'tag') {
+      const openMatch = token.value.match(OPEN_TAG);
+      const closeMatch = token.value.match(CLOSE_TAG);
+      if (openMatch && ['a', 'code', 'pre'].includes(openMatch[1])) depth++;
+      if (closeMatch && ['a', 'code', 'pre'].includes(closeMatch[1])) depth = Math.max(0, depth - 1);
+    } else if (depth === 0) {
+      safeRanges.push([start, end]);
+    }
+    offset = end;
+  }
+
+  const matches: ConfigMatch[] = [];
+  for (const [rangeStart, rangeEnd] of safeRanges) {
+    const segment = html.slice(rangeStart, rangeEnd);
+    const re = new RegExp(CONFIG_LINK_PATTERN.source, CONFIG_LINK_PATTERN.flags);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(segment))) {
+      matches.push({ start: rangeStart + m.index, end: rangeStart + m.index + m[0].length, text: m[0], protocol: m[1].toLowerCase() });
+    }
+  }
+  return matches;
+}
+
+function groupAdjacentMatches(html: string, matches: ConfigMatch[]): ConfigMatch[][] {
+  if (matches.length === 0) return [];
+  const groups: ConfigMatch[][] = [];
+  let current: ConfigMatch[] = [matches[0]];
+  for (let i = 1; i < matches.length; i++) {
+    const between = html.slice(matches[i - 1].end, matches[i].start);
+    if (/^\s*$/.test(between)) current.push(matches[i]);
+    else {
+      groups.push(current);
+      current = [matches[i]];
+    }
+  }
+  groups.push(current);
+  return groups;
+}
+
+interface ProcessedConfig {
+  ok: boolean;
+  rebuilt: string;
+  label: string | null;
+}
+
+export interface XrayConfigLabelOptions {
+  brandName: string;
+  labelStyle: 'bold' | 'blockquote';
+  mergeConsecutive: boolean;
+  fallbackLabel: string;
+}
+
+export function labelAndWrapConfigs(html: string, options: XrayConfigLabelOptions): string {
+  const { brandName, labelStyle, mergeConsecutive, fallbackLabel } = options;
+  const matches = findSafeConfigMatches(html);
+  if (matches.length === 0) return html;
+
+  let autoNumber = 0;
+  const processed: ProcessedConfig[] = matches.map((m) => {
+    if (m.protocol === 'vmess') {
+      const extracted = extractVmessLabel(m.text);
+      if (!extracted.ok) return { ok: false, rebuilt: m.text, label: null };
+      autoNumber++;
+      const finalLabel = computeFinalLabel(extracted.label, brandName, fallbackLabel, autoNumber);
+      return { ok: true, rebuilt: buildVmessWithLabel(extracted.decoded, finalLabel), label: finalLabel };
+    }
+    const { withoutFragment, rawLabel } = splitConfigFragment(m.text);
+    autoNumber++;
+    const finalLabel = computeFinalLabel(rawLabel, brandName, fallbackLabel, autoNumber);
+    return { ok: true, rebuilt: buildConfigWithFragment(withoutFragment, finalLabel), label: finalLabel };
+  });
+
+  const groups = groupAdjacentMatches(html, matches);
+
+  let result = '';
+  let cursor = 0;
+  let matchCursor = 0;
+  for (const group of groups) {
+    const groupStart = group[0].start;
+    const groupEnd = group[group.length - 1].end;
+    result += html.slice(cursor, groupStart);
+
+    const groupProcessed = processed.slice(matchCursor, matchCursor + group.length);
+    matchCursor += group.length;
+
+    // ادغام فقط وقتی معنی داره که واقعاً بیش از یکی تو گروه باشه - یه
+    // کانفیگ تنها (چه واقعاً تنها، چه چون همسایه‌ش با متن دیگه جدا شده)
+    // همیشه هدر کامل می‌گیره.
+    if (mergeConsecutive && groupProcessed.length > 1) {
+      const combined = groupProcessed.map((p) => p.rebuilt).join('\n');
+      result += `<pre>${combined}</pre>`;
+    } else {
+      result += groupProcessed
+        .map((p) => {
+          if (!p.ok) return `<code>${p.rebuilt}</code>`;
+          const header = labelStyle === 'blockquote' ? `<blockquote>${p.label}</blockquote>` : `<b>${p.label}</b>`;
+          return `${header}\n<pre>${p.rebuilt}</pre>`;
+        })
+        .join('\n\n');
+    }
+    cursor = groupEnd;
+  }
+  result += html.slice(cursor);
+  return result;
+}
