@@ -1,4 +1,4 @@
-import { wrapConfigLinks, wrapProxyLinks, formatParagraphs, wrapSubLinks, labelAndWrapConfigs } from './textSplit';
+import { wrapConfigLinks, wrapProxyLinks, formatParagraphs, wrapSubLinks, labelAndWrapConfigs, injectHashtags } from './textSplit';
 import { enqueueForTarget } from './targetQueue';
 import {
   TelegramConnection,
@@ -655,6 +655,21 @@ export class TelegramService {
           paragraphThreshold: config.contentClassifier.paragraphFormatting.paragraphThreshold,
         });
       }
+      if (config.contentClassifier?.hashtagInjection?.enabled) {
+        // چون schema این فیلدها رو داخل دو تا z.preprocess تودرتو (سازگاری
+        // رشته/آبجکت + سازگاری تخت/تودرتو) تعریف کرده، تایپ استاتیک محتاطانه
+        // hashtag/type رو اختیاری می‌بینه؛ در عمل (تست‌شده با zod واقعی)
+        // بعد از parse همیشه هردو پرن - assert امنه.
+        processedHtml = injectHashtags(processedHtml, {
+          hashtagAlwaysAdd: config.contentClassifier.hashtagInjection.hashtagAlwaysAdd as { hashtag: string; type: 'global' | 'local' }[],
+          hashtagKeywordMap: config.contentClassifier.hashtagInjection.hashtagKeywordMap as {
+            keyword: string;
+            hashtag: string;
+            type: 'global' | 'local';
+          }[],
+          targetChannel: conn.targetChannel,
+        });
+      }
     }
     // 9. Inline Buttons — حذف کامل یا جایگزینی لینک دکمه‌ها
     let processedInlineKeyboard: { text: string; url: string }[][] | undefined = message.inlineKeyboard;
@@ -1119,7 +1134,8 @@ export class TelegramService {
       !!config.contentClassifier?.proxyGrid?.enabled ||
       !!config.contentClassifier?.paragraphFormatting?.enabled ||
       !!config.contentClassifier?.subLinkFormatting?.enabled ||
-      !!config.contentClassifier?.xrayConfigLabel?.enabled;
+      !!config.contentClassifier?.xrayConfigLabel?.enabled ||
+      !!config.contentClassifier?.hashtagInjection?.enabled;
 
     if (!hasModifications && message.mediaType !== 'media_group' && message.mediaType !== 'document_group') {
       // Try copyMessage (cheapest path — Telegram handles the media transfer

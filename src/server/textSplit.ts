@@ -451,11 +451,14 @@ interface ConfigMatch {
 // همون منطق عمق‌ردیابیِ wrapConfigLinks (بیرون از a/code/pre)، ولی به‌جای
 // جایگزینی فوری، موقعیت مطلق هر match رو برمی‌گردونه - چون برای گروه‌بندی
 // و ساخت هدر/pre جدا لازمه چند match رو با هم ببینیم.
-function findSafeConfigMatches(html: string): ConfigMatch[] {
+// مشترک: بازه‌های امن (عمق صفر، بیرون از a/code/pre) - قبلاً اینجا inline
+// بود، حالا جدا شده تا injectHashtags هم بتونه ازش استفاده کنه، بدون
+// تکرار سوم همین منطق.
+function findSafeRanges(html: string): [number, number][] {
   const tokens = tokenizeHtml(html);
   let depth = 0;
   let offset = 0;
-  const safeRanges: [number, number][] = [];
+  const ranges: [number, number][] = [];
   for (const token of tokens) {
     const start = offset;
     const end = offset + token.value.length;
@@ -465,11 +468,15 @@ function findSafeConfigMatches(html: string): ConfigMatch[] {
       if (openMatch && ['a', 'code', 'pre'].includes(openMatch[1])) depth++;
       if (closeMatch && ['a', 'code', 'pre'].includes(closeMatch[1])) depth = Math.max(0, depth - 1);
     } else if (depth === 0) {
-      safeRanges.push([start, end]);
+      ranges.push([start, end]);
     }
     offset = end;
   }
+  return ranges;
+}
 
+function findSafeConfigMatches(html: string): ConfigMatch[] {
+  const safeRanges = findSafeRanges(html);
   const matches: ConfigMatch[] = [];
   for (const [rangeStart, rangeEnd] of safeRanges) {
     const segment = html.slice(rangeStart, rangeEnd);
@@ -563,4 +570,111 @@ export function labelAndWrapConfigs(html: string, options: XrayConfigLabelOption
   }
   result += html.slice(cursor);
   return result;
+}
+
+// ==================== جدید: تزریق هشتگ (عمومی/داخلی) ====================
+
+const HASHTAG_PATTERN = /#[\p{L}\p{N}\p{Pc}\u200c\u200d]+/gu;
+
+interface HashtagMatch {
+  start: number;
+  end: number;
+  text: string;
+}
+
+function findSafeHashtags(html: string): HashtagMatch[] {
+  const ranges = findSafeRanges(html);
+  const matches: HashtagMatch[] = [];
+  for (const [rangeStart, rangeEnd] of ranges) {
+    const segment = html.slice(rangeStart, rangeEnd);
+    const re = new RegExp(HASHTAG_PATTERN.source, HASHTAG_PATTERN.flags);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(segment))) {
+      matches.push({ start: rangeStart + m.index, end: rangeStart + m.index + m[0].length, text: m[0] });
+    }
+  }
+  return matches;
+}
+
+// متن خالص برای تطبیق کلمه‌کلیدی: بازه‌های امن، منهای خودِ متن هشتگ‌های
+// موجود (نباید جزو «متن معمولی پست» برای keyword-match حساب بشن).
+function plainTextExcludingHashtags(html: string, hashtags: HashtagMatch[]): string {
+  const ranges = findSafeRanges(html);
+  let text = '';
+  for (const [rangeStart, rangeEnd] of ranges) {
+    let cursor = rangeStart;
+    const inRange = hashtags.filter((h) => h.start >= rangeStart && h.end <= rangeEnd);
+    for (const h of inRange) {
+      text += html.slice(cursor, h.start) + ' ';
+      cursor = h.end;
+    }
+    text += html.slice(cursor, rangeEnd) + ' ';
+  }
+  return text;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&');
+}
+
+export interface HashtagEntry {
+  hashtag: string;
+  type: 'global' | 'local';
+}
+export interface HashtagKeywordEntry {
+  keyword: string;
+  hashtag: string;
+  type: 'global' | 'local';
+}
+export interface HashtagInjectionOptions {
+  hashtagAlwaysAdd: HashtagEntry[];
+  hashtagKeywordMap: HashtagKeywordEntry[];
+  targetChannel: string;
+}
+
+// نوع «داخلی» فقط با یوزرنیم عمومی معنی داره (#تگ@یوزرنیم)؛ کانال‌های
+// پرایوت با targetChannel عددی (بدون @) خودکار به عمومی برمی‌گردن.
+function normalizeHashtagText(rawTag: string, type: 'global' | 'local', targetChannel: string): string {
+  const trimmed = rawTag.trim().replace(/^#/, '');
+  if (!trimmed) return '';
+  if (type === 'local' && targetChannel.startsWith('@')) {
+    return `#${trimmed}@${targetChannel.slice(1)}`;
+  }
+  return `#${trimmed}`;
+}
+
+export function injectHashtags(html: string, options: HashtagInjectionOptions): string {
+  const { hashtagAlwaysAdd, hashtagKeywordMap, targetChannel } = options;
+  const existingHashtags = findSafeHashtags(html);
+  const existingWords = new Set(existingHashtags.map((h) => h.text.toLowerCase()));
+  const plainText = plainTextExcludingHashtags(html, existingHashtags);
+
+  const toAdd: string[] = [];
+  const tryAdd = (rawTag: string, type: 'global' | 'local') => {
+    const trimmed = rawTag.trim().replace(/^#/, '');
+    if (!trimmed) return;
+    const baseWordLower = `#${trimmed}`.toLowerCase();
+    if (existingWords.has(baseWordLower)) return;
+    const finalText = normalizeHashtagText(rawTag, type, targetChannel);
+    if (!finalText) return;
+    existingWords.add(baseWordLower);
+    toAdd.push(finalText);
+  };
+
+  for (const entry of hashtagAlwaysAdd) {
+    if (entry.hashtag && entry.hashtag.trim()) tryAdd(entry.hashtag, entry.type);
+  }
+  for (const entry of hashtagKeywordMap) {
+    if (!entry.keyword || !entry.keyword.trim() || !entry.hashtag || !entry.hashtag.trim()) continue;
+    const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(entry.keyword)}(?![\\p{L}\\p{N}])`, 'iu');
+    if (re.test(plainText)) tryAdd(entry.hashtag, entry.type);
+  }
+
+  if (toAdd.length === 0) return html;
+
+  if (existingHashtags.length > 0) {
+    const lastEnd = existingHashtags[existingHashtags.length - 1].end;
+    return html.slice(0, lastEnd) + ' ' + toAdd.join(' ') + html.slice(lastEnd);
+  }
+  return `${html}\n\n${toAdd.join(' ')}`;
 }
